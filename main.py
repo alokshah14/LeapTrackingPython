@@ -23,6 +23,7 @@ from game.game_engine import GameEngine, GameState
 from tracking.leap_controller import LeapController, SimulatedLeapController
 from tracking.hand_tracker import HandTracker
 from tracking.calibration import CalibrationManager
+from tracking.session_logger import SessionLogger
 from ui.game_ui import GameUI, MenuUI
 from ui.hand_renderer import HandRenderer, CalibrationHandRenderer
 from ui.colors import BACKGROUND
@@ -50,6 +51,9 @@ class FingerInvaders:
 
         # Initialize game engine
         self.game_engine = GameEngine(self.hand_tracker, self.calibration)
+
+        # Initialize session logger
+        self.session_logger = SessionLogger()
 
         # Initialize UI components
         self.game_ui = GameUI(self.screen)
@@ -113,6 +117,9 @@ class FingerInvaders:
             if state == GameState.PLAYING:
                 self.game_engine.pause_game()
             elif state == GameState.PAUSED:
+                # End session when leaving game
+                game_state = self.game_engine.get_game_state()
+                self.session_logger.end_session(game_state['score'], game_state['lives'])
                 self.game_engine.state = GameState.MENU
             elif state == GameState.GAME_OVER:
                 self.game_engine.state = GameState.MENU
@@ -126,7 +133,11 @@ class FingerInvaders:
             if state == GameState.PAUSED:
                 self.game_engine.resume_game()
             elif state == GameState.GAME_OVER:
+                # End previous session and start new one
+                game_state = self.game_engine.get_game_state()
+                self.session_logger.end_session(game_state['score'], game_state['lives'])
                 self.game_engine.start_game()
+                self.session_logger.start_session(self.calibration.calibration_data)
             elif state == GameState.CALIBRATION_MENU:
                 self.calibration.start_calibration()
                 self.game_engine.state = GameState.CALIBRATING
@@ -165,6 +176,8 @@ class FingerInvaders:
         if option == 0 and self.calibration.has_calibration():
             # Start Game
             self.game_engine.start_game()
+            # Start session logging with calibration data
+            self.session_logger.start_session(self.calibration.calibration_data)
         elif option == 1:
             # Calibrate
             self.game_engine.state = GameState.CALIBRATION_MENU
@@ -178,6 +191,34 @@ class FingerInvaders:
 
         if state == GameState.PLAYING:
             events = self.game_engine.update(dt)
+
+            # Get current hand data for logging
+            hand_data = self.leap_controller.update()
+            game_state = self.game_engine.get_game_state()
+
+            # Log finger press events
+            for press_event in events.get('finger_presses', []):
+                self.session_logger.log_finger_press(
+                    finger_pressed=press_event['finger'],
+                    target_finger=press_event['target'],
+                    is_correct=press_event['correct'],
+                    left_hand_data=hand_data.get('left'),
+                    right_hand_data=hand_data.get('right'),
+                    score=game_state['score'],
+                    lives=game_state['lives'],
+                    difficulty=game_state['difficulty']
+                )
+
+            # Log missed missiles
+            for missed in events.get('missiles_missed', []):
+                self.session_logger.log_missile_missed(
+                    target_finger=missed,
+                    left_hand_data=hand_data.get('left'),
+                    right_hand_data=hand_data.get('right'),
+                    score=game_state['score'],
+                    lives=game_state['lives'],
+                    difficulty=game_state['difficulty']
+                )
 
             # Handle events for UI feedback
             if events['score_change'] > 0:
@@ -333,6 +374,11 @@ class FingerInvaders:
 
     def _cleanup(self):
         """Clean up resources."""
+        # End any active session
+        if self.session_logger.session_data:
+            game_state = self.game_engine.get_game_state()
+            self.session_logger.end_session(game_state['score'], game_state['lives'])
+
         self.leap_controller.cleanup()
         pygame.quit()
 

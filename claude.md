@@ -32,6 +32,19 @@ A rehabilitation/training game that uses Leap Motion hand tracking to practice f
   - Wrong answers decrease difficulty slightly
   - Difficulty levels: Easy, Medium, Hard, Expert
 
+### Session Data Logging
+- Automatic session logging to `session_logs/` directory
+- Each session creates a JSON file with timestamp (e.g., `session_20240130_143052.json`)
+- Logs every finger press with:
+  - Timestamp (ISO format and elapsed seconds)
+  - Finger pressed and target finger
+  - Whether press was correct or wrong
+  - Full hand tracking data (X, Y, Z coordinates for both hands)
+  - All fingertip positions
+  - Current game state (score, lives, difficulty)
+- Logs missed missiles with hand positions
+- Session summary with accuracy percentage
+
 ## File Structure
 
 ```
@@ -47,7 +60,9 @@ LeapTrackingPython/
 │   ├── __init__.py
 │   ├── leap_controller.py  # Leap Motion interface using official bindings
 │   ├── hand_tracker.py     # Hand and finger tracking
-│   └── calibration.py      # Calibration system with user confirmation
+│   ├── calibration.py      # Calibration system with user confirmation
+│   └── session_logger.py   # Session data logging for analysis
+├── session_logs/           # Session data files (generated)
 ├── ui/
 │   ├── __init__.py
 │   ├── hand_renderer.py    # Hand visualization
@@ -121,6 +136,12 @@ Left Hand:              Right Hand:
   - Integrated official ultraleap/leapc-python-bindings
   - Calibration now uses event-driven API with user confirmation (SPACE key)
   - Added proper hand detection waiting before calibration starts
+- v1.0.2 - Added session data logging:
+  - New `SessionLogger` class tracks all finger presses
+  - Logs timestamps, correctness, and full hand X/Y/Z coordinates
+  - Session files saved to `session_logs/` directory as JSON
+  - Includes session summary with accuracy statistics
+  - Calibration data included in session for reference
 
 ## Known Issues
 - Leap Motion SDK must be properly installed separately
@@ -131,4 +152,4 @@ Left Hand:              Right Hand:
 - [ ] Sound effects and music
 - [ ] High score persistence
 - [ ] Multiplayer support
-- [ ] Analytics and progress tracking
+- [x] Analytics and progress tracking (session logging implemented)

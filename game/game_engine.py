@@ -134,6 +134,8 @@ class GameEngine:
             'missile_destroyed': [],
             'wrong_finger': False,
             'difficulty_changed': False,
+            'finger_presses': [],  # List of {finger, target, correct}
+            'missiles_missed': [],  # List of finger names for missed missiles
         }
 
         if self.state != GameState.PLAYING:
@@ -177,17 +179,28 @@ class GameEngine:
         # Find if there's a missile in this finger's lane
         lane = FINGER_NAMES.index(finger_name)
         target_missile = None
+        target_finger = None
 
         for missile in self.enemy_missiles:
             if missile.lane == lane and missile.active:
                 target_missile = missile
+                target_finger = missile.finger_name
                 break
 
         # Create player missile
         player_missile = PlayerMissile(lane, target_missile)
         self.player_missiles.append(player_missile)
 
-        if target_missile:
+        is_correct = target_missile is not None
+
+        # Log the finger press event
+        events['finger_presses'].append({
+            'finger': finger_name,
+            'target': target_finger,
+            'correct': is_correct,
+        })
+
+        if is_correct:
             # Correct finger - will hit target
             self.score += POINTS_CORRECT_HIT
             self.correct_streak += 1
@@ -228,6 +241,7 @@ class GameEngine:
                 self.score += POINTS_MISSILE_MISSED
                 self.score = max(0, self.score)
                 events['life_lost'] = True
+                events['missiles_missed'].append(missile.finger_name)
                 self.stats['missiles_missed'] += 1
                 self.enemy_missiles.remove(missile)
 
