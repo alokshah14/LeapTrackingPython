@@ -20,9 +20,9 @@ from game.constants import (
     FINGER_NAMES
 )
 from game.game_engine import GameEngine, GameState
-from leap.leap_controller import LeapController, SimulatedLeapController
-from leap.hand_tracker import HandTracker
-from leap.calibration import CalibrationManager
+from tracking.leap_controller import LeapController, SimulatedLeapController
+from tracking.hand_tracker import HandTracker
+from tracking.calibration import CalibrationManager
 from ui.game_ui import GameUI, MenuUI
 from ui.hand_renderer import HandRenderer, CalibrationHandRenderer
 from ui.colors import BACKGROUND
@@ -130,6 +130,9 @@ class FingerInvaders:
             elif state == GameState.CALIBRATION_MENU:
                 self.calibration.start_calibration()
                 self.game_engine.state = GameState.CALIBRATING
+            elif state == GameState.CALIBRATING:
+                # Confirm phase transition in calibration
+                self.calibration.confirm_phase_transition()
 
         # Menu navigation
         elif state == GameState.MENU:
@@ -219,25 +222,23 @@ class FingerInvaders:
         if not current_finger:
             return
 
-        # Get the relative Y position for the current finger
+        # Get hand data and relative Y position for the current finger
+        hand_data = self.leap_controller.update()
         relative_y = self.hand_tracker.get_finger_relative_y(current_finger)
 
-        # Add sample
-        self.calibration.add_sample(relative_y)
+        # Update calibration with current data
+        still_calibrating = self.calibration.update_calibration(hand_data, relative_y)
 
-        # Check if we have enough samples
-        if self.calibration.has_enough_samples():
-            # Advance to next phase
-            if not self.calibration.advance_phase():
-                # Calibration complete
-                self.game_engine.state = GameState.MENU
+        if not still_calibrating:
+            self.game_engine.state = GameState.MENU
 
         # Update calibration renderer
         status = self.calibration.get_calibration_status()
+        samples_needed = max(status['samples_needed'], 1)
         self.calibration_renderer.set_calibration_state(
             current_finger,
             status['phase'],
-            status['samples_collected'] / status['samples_needed']
+            status['samples_collected'] / samples_needed
         )
 
     def _render(self):

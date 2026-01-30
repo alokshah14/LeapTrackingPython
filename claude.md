@@ -43,11 +43,11 @@ LeapTrackingPython/
 │   ├── missile.py          # Missile class and behavior
 │   ├── player_missile.py   # Player shot missiles
 │   └── constants.py        # Game constants and settings
-├── leap/
+├── tracking/               # Leap Motion integration (renamed from leap/)
 │   ├── __init__.py
-│   ├── leap_controller.py  # Leap Motion interface
+│   ├── leap_controller.py  # Leap Motion interface using official bindings
 │   ├── hand_tracker.py     # Hand and finger tracking
-│   └── calibration.py      # Calibration system
+│   └── calibration.py      # Calibration system with user confirmation
 ├── ui/
 │   ├── __init__.py
 │   ├── hand_renderer.py    # Hand visualization
@@ -62,15 +62,16 @@ LeapTrackingPython/
 ## Dependencies
 - Python 3.8+
 - pygame >= 2.5.0
-- leap (Leap Motion SDK Python bindings)
+- leapc-python-bindings (Official Ultraleap Python SDK from GitHub)
 - numpy
 
 ## Installation
 
-1. Install Leap Motion SDK and ensure service is running
+1. Install Ultraleap Hand Tracking software and ensure service is running
 2. Install Python dependencies:
    ```bash
    pip install -r requirements.txt
+   pip install git+https://github.com/ultraleap/leapc-python-bindings.git#subdirectory=leapc-python-api
    ```
 3. Run the game:
    ```bash
@@ -91,10 +92,14 @@ Left Hand:              Right Hand:
 ```
 
 ## Calibration Process
-1. Place hands in comfortable position above Leap Motion
-2. Press each finger individually when prompted
-3. System records "rest" and "pressed" positions
-4. Threshold calculated as midpoint between states
+1. Select "Calibrate" from menu and press SPACE to begin
+2. Place the required hand above the Leap Motion sensor
+3. For each finger:
+   - Keep finger RELAXED while system collects rest position samples
+   - Press SPACE when prompted, then PRESS finger DOWN
+   - Hold pressed position while system collects press samples
+4. System calculates threshold as midpoint between rest and press positions
+5. Calibration is saved automatically to `calibration_data.json`
 
 ## Technical Notes
 
@@ -111,6 +116,11 @@ Left Hand:              Right Hand:
 
 ## Development History
 - v1.0.0 - Initial implementation with full feature set
+- v1.0.1 - Fixed Leap Motion integration:
+  - Renamed `leap/` to `tracking/` to avoid SDK naming conflict
+  - Integrated official ultraleap/leapc-python-bindings
+  - Calibration now uses event-driven API with user confirmation (SPACE key)
+  - Added proper hand detection waiting before calibration starts
 
 ## Known Issues
 - Leap Motion SDK must be properly installed separately
