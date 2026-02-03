@@ -153,3 +153,11 @@ Left Hand:              Right Hand:
 - [ ] High score persistence
 - [ ] Multiplayer support
 - [x] Analytics and progress tracking (session logging implemented)
+
+---
+
+## Conversation Log
+
+### 2026-02-03
+- **Session started**: User requested to track conversations in CLAUDE.md and commit changes
+- Project context reviewed: Leap Motion finger individuation game for rehabilitation/training
