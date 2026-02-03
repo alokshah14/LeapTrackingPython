@@ -27,6 +27,7 @@ from tracking.session_logger import SessionLogger
 from ui.game_ui import GameUI, MenuUI
 from ui.hand_renderer import HandRenderer, CalibrationHandRenderer
 from ui.colors import BACKGROUND
+from game.sound_manager import SoundManager
 
 
 class FingerInvaders:
@@ -54,6 +55,9 @@ class FingerInvaders:
 
         # Initialize session logger
         self.session_logger = SessionLogger()
+
+        # Initialize sound manager
+        self.sound_manager = SoundManager()
 
         # Initialize UI components
         self.game_ui = GameUI(self.screen)
@@ -113,7 +117,18 @@ class FingerInvaders:
         state = self.game_engine.state
 
         # Global keys
-        if event.key == pygame.K_ESCAPE:
+        if event.key == pygame.K_m:
+            # Toggle sound
+            enabled = self.sound_manager.toggle_sound()
+            print(f"Sound {'enabled' if enabled else 'disabled'}")
+
+        elif event.key == pygame.K_b:
+            # Toggle angle bars during gameplay
+            if state == GameState.PLAYING:
+                enabled = self.hand_renderer.toggle_angle_bars()
+                print(f"Angle bars {'enabled' if enabled else 'disabled'}")
+
+        elif event.key == pygame.K_ESCAPE:
             if state == GameState.PLAYING:
                 self.game_engine.pause_game()
             elif state == GameState.PAUSED:
@@ -196,7 +211,7 @@ class FingerInvaders:
             hand_data = self.leap_controller.update()
             game_state = self.game_engine.get_game_state()
 
-            # Log finger press events
+            # Log finger press events and play sounds
             for press_event in events.get('finger_presses', []):
                 self.session_logger.log_finger_press(
                     finger_pressed=press_event['finger'],
@@ -208,6 +223,15 @@ class FingerInvaders:
                     lives=game_state['lives'],
                     difficulty=game_state['difficulty']
                 )
+
+                # Play fire sound for every finger press
+                self.sound_manager.play_fire()
+
+                # Play hit or miss sound based on correctness
+                if press_event['correct']:
+                    self.sound_manager.play_hit()
+                else:
+                    self.sound_manager.play_miss()
 
             # Log missed missiles
             for missed in events.get('missiles_missed', []):
@@ -228,12 +252,21 @@ class FingerInvaders:
 
             if events['life_lost']:
                 self.game_ui.trigger_lives_flash()
+                self.sound_manager.play_life_lost()
 
             for pos in events['missile_destroyed']:
                 self.game_ui.add_explosion(pos[0], pos[1])
+                self.sound_manager.play_explosion()
 
             # Update hand highlighting
             self.hand_renderer.set_highlighted_fingers(self.game_engine.get_highlighted_fingers())
+
+            # Update finger angle data for display
+            finger_angles = self.hand_tracker.get_all_finger_angles()
+            self.hand_renderer.set_finger_angles(
+                finger_angles,
+                self.calibration.baseline_angles
+            )
 
         elif state == GameState.CALIBRATING:
             self._update_calibration(dt)
@@ -399,6 +432,8 @@ def main():
     print("  - Enter: Select menu option")
     print("  - Space: Start/Resume/Restart")
     print("  - Escape: Pause/Menu/Quit")
+    print("  - M: Toggle sound on/off")
+    print("  - B: Toggle angle bars display")
     print()
     print("Simulation Mode Keys (when Leap Motion not available):")
     print("  Left hand:  Q(pinky) W(ring) E(middle) R(index) T(thumb)")

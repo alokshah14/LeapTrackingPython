@@ -48,6 +48,11 @@ class HandRenderer:
         # Pulse animation for highlights
         self.pulse_phase = 0
 
+        # Finger angle data for display
+        self.finger_angles = {}
+        self.baseline_angles = {}
+        self.show_angle_bars = True  # Toggle for angle bar display
+
     def set_highlighted_fingers(self, fingers: List[str]):
         """
         Set which fingers should be highlighted.
@@ -64,6 +69,23 @@ class HandRenderer:
     def update(self, dt: float = 1.0):
         """Update animations."""
         self.pulse_phase += 0.1 * dt
+
+    def set_finger_angles(self, angles: Dict[str, float], baselines: Dict[str, float] = None):
+        """
+        Set finger angle data for display.
+
+        Args:
+            angles: Dictionary mapping finger names to current angles
+            baselines: Dictionary mapping finger names to baseline angles
+        """
+        self.finger_angles = angles
+        if baselines:
+            self.baseline_angles = baselines
+
+    def toggle_angle_bars(self):
+        """Toggle the angle bar display on/off."""
+        self.show_angle_bars = not self.show_angle_bars
+        return self.show_angle_bars
 
     def draw(self, hand_data: Dict, finger_states: Dict[str, bool]):
         """
@@ -98,6 +120,10 @@ class HandRenderer:
 
         # Draw finger labels
         self._draw_finger_labels()
+
+        # Draw angle bars if enabled and we have angle data
+        if self.show_angle_bars and self.finger_angles:
+            self._draw_angle_bars(finger_states)
 
     def _draw_hand(self, hand_type: str, hand_data: Optional[Dict],
                    finger_states: Dict[str, bool], center: tuple, mirror: bool = False):
@@ -201,6 +227,61 @@ class HandRenderer:
             label = font.render(display, True, color)
             label_rect = label.get_rect(center=(x, y + 12))
             self.surface.blit(label, label_rect)
+
+    def _draw_angle_bars(self, finger_states: Dict[str, bool]):
+        """Draw vertical angle bars for each finger."""
+        # Bar dimensions
+        bar_width = 20
+        bar_height = 60
+        bar_spacing = WINDOW_WIDTH // 10
+        bar_y = self.hand_area_top + 25
+
+        font = pygame.font.Font(None, 18)
+        threshold_angle = 30.0  # The press threshold
+        max_display_angle = 60.0
+
+        for i, finger_name in enumerate(FINGER_NAMES):
+            x = i * bar_spacing + (bar_spacing // 2) - (bar_width // 2)
+
+            # Get angle data
+            current_angle = self.finger_angles.get(finger_name, 0.0)
+            baseline = self.baseline_angles.get(finger_name, 0.0)
+            angle_from_baseline = current_angle - baseline if baseline else current_angle
+
+            # Clamp angle for display
+            display_angle = max(0, min(max_display_angle, angle_from_baseline))
+            fill_ratio = display_angle / max_display_angle
+
+            # Get finger color
+            finger_color = FINGER_COLORS.get(finger_name, WHITE)
+            is_pressed = finger_states.get(finger_name, False)
+
+            # Background
+            pygame.draw.rect(self.surface, (30, 30, 50), (x, bar_y, bar_width, bar_height))
+
+            # Fill bar (from bottom up)
+            fill_height = int(bar_height * fill_ratio)
+            if fill_height > 0:
+                fill_color = (100, 255, 100) if angle_from_baseline >= threshold_angle else (100, 150, 255)
+                if is_pressed:
+                    fill_color = (100, 255, 100)
+                pygame.draw.rect(self.surface, fill_color,
+                               (x, bar_y + bar_height - fill_height, bar_width, fill_height))
+
+            # Threshold line
+            threshold_y = bar_y + bar_height - int(bar_height * (threshold_angle / max_display_angle))
+            pygame.draw.line(self.surface, (255, 255, 0),
+                           (x - 2, threshold_y), (x + bar_width + 2, threshold_y), 2)
+
+            # Border
+            border_color = finger_color if is_pressed else (80, 80, 100)
+            pygame.draw.rect(self.surface, border_color, (x, bar_y, bar_width, bar_height), 2)
+
+            # Angle text
+            angle_text = f"{angle_from_baseline:.0f}"
+            text_surface = font.render(angle_text, True, WHITE)
+            text_x = x + bar_width // 2 - text_surface.get_width() // 2
+            self.surface.blit(text_surface, (text_x, bar_y + bar_height + 2))
 
 
 class CalibrationHandRenderer(HandRenderer):

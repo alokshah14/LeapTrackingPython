@@ -198,3 +198,34 @@ Left Hand:              Right Hand:
 7. **main.py**:
    - Updated `_update_calibration()` to pass finger angles to calibration system
    - Added angle data updates to calibration renderer
+
+#### Sound Effects & Gameplay Angle Display
+**User Request**: Add sound effects and show angle bars during gameplay
+
+**Changes Made**:
+1. **game/sound_manager.py** (New File):
+   - Generates sound effects programmatically (no external files needed)
+   - Fire sound: laser-like descending sweep
+   - Explosion sound: noise + low frequency rumble
+   - Hit sound: rising pitch success tone
+   - Miss sound: descending dissonant tone
+   - Life lost sound: deep descending tone
+   - Toggle sound on/off with `M` key
+
+2. **ui/hand_renderer.py**:
+   - Added `_draw_angle_bars()` method
+   - Shows vertical bars for each finger during gameplay
+   - Blue fill = below threshold, Green fill = at/above 30 degrees
+   - Yellow threshold line marker
+   - Numerical angle display below each bar
+   - Toggle with `B` key
+
+3. **main.py**:
+   - Integrated SoundManager
+   - Play fire sound on every finger press
+   - Play hit/miss sound based on correctness
+   - Play explosion on missile destroy
+   - Play life_lost when losing a life
+   - Added `M` key to toggle sounds
+   - Added `B` key to toggle angle bars
+   - Pass finger angles to hand renderer during gameplay
