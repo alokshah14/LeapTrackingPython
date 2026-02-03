@@ -256,30 +256,35 @@ class FingerInvaders:
             self.game_engine.state = GameState.MENU
             return
 
-        # Update hand tracking to get current finger position
+        # Update hand tracking to get current finger positions and angles
         self.hand_tracker.update()
 
         current_finger = self.calibration.get_current_finger()
-        if not current_finger:
-            return
 
-        # Get hand data and relative Y position for the current finger
+        # Get hand data and all finger angles
         hand_data = self.leap_controller.update()
-        relative_y = self.hand_tracker.get_finger_relative_y(current_finger)
+        finger_angles = self.hand_tracker.get_all_finger_angles()
 
         # Update calibration with current data
-        still_calibrating = self.calibration.update_calibration(hand_data, relative_y)
+        still_calibrating = self.calibration.update_calibration(hand_data, finger_angles)
 
         if not still_calibrating:
             self.game_engine.state = GameState.MENU
 
         # Update calibration renderer
         status = self.calibration.get_calibration_status()
-        samples_needed = max(status['samples_needed'], 1)
         self.calibration_renderer.set_calibration_state(
             current_finger,
             status['phase'],
-            status['samples_collected'] / samples_needed
+            status['progress']
+        )
+
+        # Update angle data for display
+        self.calibration_renderer.set_angle_data(
+            status.get('current_angle', 0.0),
+            status.get('angle_from_baseline', 0.0),
+            status.get('threshold_angle', 30.0),
+            finger_angles
         )
 
     def _render(self):

@@ -79,6 +79,7 @@ WRONG_HITS_TO_DECREASE = 3    # Wrong hits needed to decrease difficulty
 # Calibration settings
 CALIBRATION_FILE = 'calibration_data.json'
 FINGER_PRESS_THRESHOLD = 0.3  # Default threshold (calibration will override)
+FINGER_PRESS_ANGLE_THRESHOLD = 30  # Degrees of flexion to consider finger pressed
 PRESS_DEBOUNCE_TIME = 200  # ms between registered presses
 
 # Explosion settings

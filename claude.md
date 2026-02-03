@@ -161,3 +161,40 @@ Left Hand:              Right Hand:
 ### 2026-02-03
 - **Session started**: User requested to track conversations in CLAUDE.md and commit changes
 - Project context reviewed: Leap Motion finger individuation game for rehabilitation/training
+
+#### Calibration System Overhaul (Angle-Based)
+**User Request**: Redesign calibration to use finger flexion angles instead of Y-position thresholds
+
+**Changes Made**:
+1. **constants.py**: Added `FINGER_PRESS_ANGLE_THRESHOLD = 30` (degrees)
+
+2. **leap_controller.py**:
+   - Extract bone direction vectors (proximal and intermediate) for angle calculation
+   - Updated both real controller and simulated controller
+
+3. **hand_tracker.py**:
+   - Added `finger_angles` dictionary to track flexion angles
+   - Added `baseline_angles` for storing rest positions
+   - New methods: `_calculate_flexion_angle()`, `get_finger_angle()`, `get_finger_angle_from_baseline()`, `set_baseline_angle()`, `get_all_finger_angles()`
+
+4. **calibration.py** (Complete Rewrite):
+   - New calibration phases: `waiting_hands` -> `capturing_baseline` -> `calibrating_finger` -> `complete`
+   - First captures baseline (rest angles) for ALL fingers simultaneously
+   - Then calibrates each finger by waiting for 30-degree press
+   - Auto-advances to next finger (no spacebar needed)
+   - 500ms hold requirement to confirm press
+   - Stores both angle-based and Y-position thresholds for compatibility
+
+5. **hand_renderer.py**:
+   - `CalibrationHandRenderer` now displays real-time angle readout
+   - Large numerical display showing current angle in degrees
+   - Visual gauge bar with threshold marker
+   - Hold progress indicator when threshold reached
+
+6. **game_ui.py**:
+   - Updated calibration menu to explain new angle-based process
+   - Highlighted key info about 30-degree threshold and auto-advance
+
+7. **main.py**:
+   - Updated `_update_calibration()` to pass finger angles to calibration system
+   - Added angle data updates to calibration renderer

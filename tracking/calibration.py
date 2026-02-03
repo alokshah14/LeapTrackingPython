@@ -1,4 +1,4 @@
-"""Calibration system for finger press detection."""
+"""Calibration system for finger press detection using angle-based thresholds."""
 
 import json
 import os
@@ -6,12 +6,12 @@ import time
 from typing import Dict, Optional
 from game.constants import (
     CALIBRATION_FILE, FINGER_NAMES, FINGER_DISPLAY_NAMES,
-    FINGER_PRESS_THRESHOLD
+    FINGER_PRESS_THRESHOLD, FINGER_PRESS_ANGLE_THRESHOLD
 )
 
 
 class CalibrationManager:
-    """Manages calibration data for finger press detection."""
+    """Manages calibration data for finger press detection using angle-based thresholds."""
 
     def __init__(self, calibration_file: str = CALIBRATION_FILE):
         """Initialize the calibration manager."""
@@ -19,21 +19,35 @@ class CalibrationManager:
         self.calibration_data = {}
         self.is_calibrated = False
 
-        # Default thresholds
+        # Default thresholds (Y-position based, for backward compatibility)
         self.thresholds = {name: FINGER_PRESS_THRESHOLD for name in FINGER_NAMES}
+
+        # Angle-based thresholds
+        self.angle_thresholds = {name: FINGER_PRESS_ANGLE_THRESHOLD for name in FINGER_NAMES}
+        self.baseline_angles = {name: None for name in FINGER_NAMES}
 
         # Calibration process state
         self.calibrating = False
         self.current_finger_index = 0
-        self.calibration_phase = 'idle'  # 'waiting_hands', 'rest', 'press', 'transitioning', 'complete'
-        self.samples = {'rest': [], 'press': []}
-        self.sample_count = 30  # More samples for accuracy
-        self.sample_delay = 0.05  # 50ms between samples
+        self.calibration_phase = 'idle'  # 'waiting_hands', 'capturing_baseline', 'calibrating_finger', 'complete'
+
+        # Baseline capture state
+        self.baseline_samples = {name: [] for name in FINGER_NAMES}
+        self.baseline_sample_count = 30  # Samples needed for baseline
+        self.baseline_captured = False
+
+        # Current finger angle tracking
+        self.current_finger_angle = 0.0
+        self.current_finger_angle_from_baseline = 0.0
 
         # Timing
         self.last_sample_time = 0
+        self.sample_delay = 0.03  # 30ms between samples
         self.phase_start_time = 0
-        self.transition_duration = 1.0  # 1 second transition between phases
+
+        # Auto-advance hold time (must hold at threshold for this long)
+        self.hold_time_required = 0.5  # 500ms
+        self.threshold_reached_time = None
 
         # Load existing calibration if available
         self._load_calibration()
@@ -49,6 +63,8 @@ class CalibrationManager:
 
             self.calibration_data = data
             self.thresholds = data.get('thresholds', self.thresholds)
+            self.angle_thresholds = data.get('angle_thresholds', self.angle_thresholds)
+            self.baseline_angles = data.get('baseline_angles', self.baseline_angles)
             self.is_calibrated = True
             print("Loaded existing calibration data.")
             return True
@@ -61,6 +77,8 @@ class CalibrationManager:
         """Save calibration data to file."""
         data = {
             'thresholds': self.thresholds,
+            'angle_thresholds': self.angle_thresholds,
+            'baseline_angles': self.baseline_angles,
             'calibration_data': self.calibration_data,
             'timestamp': time.time(),
         }
@@ -77,18 +95,30 @@ class CalibrationManager:
         return self.is_calibrated
 
     def get_threshold(self, finger_name: str) -> float:
-        """Get the press threshold for a specific finger."""
+        """Get the press threshold for a specific finger (Y-position based)."""
         return self.thresholds.get(finger_name, FINGER_PRESS_THRESHOLD)
+
+    def get_angle_threshold(self, finger_name: str) -> float:
+        """Get the angle threshold for a specific finger."""
+        return self.angle_thresholds.get(finger_name, FINGER_PRESS_ANGLE_THRESHOLD)
+
+    def get_baseline_angle(self, finger_name: str) -> Optional[float]:
+        """Get the baseline angle for a specific finger."""
+        return self.baseline_angles.get(finger_name)
 
     def start_calibration(self):
         """Start the calibration process."""
         self.calibrating = True
         self.current_finger_index = 0
         self.calibration_phase = 'waiting_hands'
-        self.samples = {'rest': [], 'press': []}
+        self.baseline_samples = {name: [] for name in FINGER_NAMES}
+        self.baseline_captured = False
         self.calibration_data = {}
         self.phase_start_time = time.time()
-        print("Starting calibration process...")
+        self.threshold_reached_time = None
+        self.current_finger_angle = 0.0
+        self.current_finger_angle_from_baseline = 0.0
+        print("Starting angle-based calibration process...")
 
     def get_current_finger(self) -> Optional[str]:
         """Get the finger currently being calibrated."""
@@ -104,29 +134,36 @@ class CalibrationManager:
 
     def get_calibration_status(self) -> Dict:
         """Get current calibration status."""
-        phase = self.calibration_phase
-        samples_count = len(self.samples.get('rest' if phase == 'rest' else 'press', []))
-
         return {
             'calibrating': self.calibrating,
             'current_finger': self.get_current_finger(),
             'current_finger_display': self.get_current_finger_display(),
             'finger_index': self.current_finger_index,
             'total_fingers': len(FINGER_NAMES),
-            'phase': phase,
-            'samples_collected': samples_count,
-            'samples_needed': self.sample_count,
+            'phase': self.calibration_phase,
+            'baseline_captured': self.baseline_captured,
+            'current_angle': self.current_finger_angle,
+            'angle_from_baseline': self.current_finger_angle_from_baseline,
+            'threshold_angle': FINGER_PRESS_ANGLE_THRESHOLD,
             'progress': self.current_finger_index / len(FINGER_NAMES),
-            'waiting_for_space': phase == 'transitioning',
+            'threshold_reached': self.threshold_reached_time is not None,
+            'hold_progress': self._get_hold_progress(),
         }
 
-    def update_calibration(self, hand_data: Dict, relative_y: float) -> bool:
+    def _get_hold_progress(self) -> float:
+        """Get progress of holding at threshold (0.0 to 1.0)."""
+        if self.threshold_reached_time is None:
+            return 0.0
+        elapsed = time.time() - self.threshold_reached_time
+        return min(1.0, elapsed / self.hold_time_required)
+
+    def update_calibration(self, hand_data: Dict, finger_angles: Dict) -> bool:
         """
-        Update calibration with current hand data.
+        Update calibration with current hand data and finger angles.
 
         Args:
             hand_data: Current hand tracking data
-            relative_y: Relative Y position of current finger
+            finger_angles: Dictionary of finger angles from hand tracker
 
         Returns:
             True if calibration is still in progress
@@ -136,90 +173,127 @@ class CalibrationManager:
 
         current_time = time.time()
 
-        # Check if waiting for hands
+        # Phase: Waiting for hands
         if self.calibration_phase == 'waiting_hands':
-            finger = self.get_current_finger()
-            if finger:
-                hand_type = 'left' if 'left' in finger else 'right'
-                if hand_data.get(hand_type) is not None:
-                    self.calibration_phase = 'rest'
-                    self.phase_start_time = current_time
-                    print(f"Hand detected, starting calibration for {finger}")
+            # Check if both hands are visible
+            left_visible = hand_data.get('left') is not None
+            right_visible = hand_data.get('right') is not None
+
+            if left_visible and right_visible:
+                self.calibration_phase = 'capturing_baseline'
+                self.phase_start_time = current_time
+                print("Both hands detected. Capturing baseline - keep all fingers RELAXED...")
             return True
 
-        # Transitioning phase - wait for user to press space
-        if self.calibration_phase == 'transitioning':
-            return True
+        # Phase: Capturing baseline for all fingers
+        if self.calibration_phase == 'capturing_baseline':
+            return self._update_baseline_capture(hand_data, finger_angles, current_time)
 
-        # Collect samples with delay
-        if current_time - self.last_sample_time >= self.sample_delay:
-            self.last_sample_time = current_time
-
-            phase = self.calibration_phase
-            if phase in ['rest', 'press']:
-                self.samples[phase].append(relative_y)
-
-                # Check if we have enough samples
-                if len(self.samples[phase]) >= self.sample_count:
-                    self._advance_to_next_phase()
+        # Phase: Calibrating individual fingers
+        if self.calibration_phase == 'calibrating_finger':
+            return self._update_finger_calibration(hand_data, finger_angles, current_time)
 
         return True
 
-    def confirm_phase_transition(self):
-        """User pressed SPACE to confirm phase transition."""
-        if self.calibration_phase == 'transitioning':
-            self.samples['press'] = []  # Clear press samples
-            self.calibration_phase = 'press'
-            self.phase_start_time = time.time()
-            print("Starting press phase...")
+    def _update_baseline_capture(self, hand_data: Dict, finger_angles: Dict, current_time: float) -> bool:
+        """Capture baseline angles for all fingers."""
+        # Collect samples for all fingers
+        if current_time - self.last_sample_time >= self.sample_delay:
+            self.last_sample_time = current_time
 
-    def _advance_to_next_phase(self):
-        """Advance to next calibration phase."""
-        if self.calibration_phase == 'rest':
-            # Go to transitioning state - wait for user to confirm
-            self.calibration_phase = 'transitioning'
-            self.phase_start_time = time.time()
-            print("Rest samples collected. Press SPACE when ready to press finger.")
+            for finger_name in FINGER_NAMES:
+                angle = finger_angles.get(finger_name, 0.0)
+                self.baseline_samples[finger_name].append(angle)
 
-        elif self.calibration_phase == 'press':
-            # Calculate threshold for this finger
-            finger_name = self.get_current_finger()
-            self._calculate_threshold(finger_name)
+            # Check if we have enough samples for all fingers
+            min_samples = min(len(samples) for samples in self.baseline_samples.values())
 
-            # Move to next finger
-            self.current_finger_index += 1
-            self.samples = {'rest': [], 'press': []}
+            if min_samples >= self.baseline_sample_count:
+                # Calculate baseline averages
+                for finger_name in FINGER_NAMES:
+                    samples = self.baseline_samples[finger_name]
+                    avg = sum(samples) / len(samples)
+                    self.baseline_angles[finger_name] = avg
+                    print(f"Baseline for {finger_name}: {avg:.1f} degrees")
 
-            if self.current_finger_index >= len(FINGER_NAMES):
-                self._complete_calibration()
-            else:
-                self.calibration_phase = 'waiting_hands'
-                self.phase_start_time = time.time()
-                print(f"Moving to next finger: {self.get_current_finger()}")
+                self.baseline_captured = True
+                self.calibration_phase = 'calibrating_finger'
+                self.phase_start_time = current_time
+                print(f"Baseline captured. Now calibrating {self.get_current_finger()}...")
+                print(f"Press finger down past {FINGER_PRESS_ANGLE_THRESHOLD} degrees to calibrate.")
 
-    def _calculate_threshold(self, finger_name: str):
-        """Calculate and store threshold for a finger."""
-        rest_samples = self.samples['rest']
-        press_samples = self.samples['press']
+        return True
 
-        if not rest_samples or not press_samples:
-            self.thresholds[finger_name] = FINGER_PRESS_THRESHOLD
-            return
+    def _update_finger_calibration(self, hand_data: Dict, finger_angles: Dict, current_time: float) -> bool:
+        """Calibrate individual fingers by detecting when they reach the threshold angle."""
+        current_finger = self.get_current_finger()
+        if not current_finger:
+            self._complete_calibration()
+            return False
 
-        rest_avg = sum(rest_samples) / len(rest_samples)
-        press_avg = sum(press_samples) / len(press_samples)
+        # Check if the correct hand is visible
+        hand_type = 'left' if 'left' in current_finger else 'right'
+        if hand_data.get(hand_type) is None:
+            self.threshold_reached_time = None
+            return True
 
-        # Threshold is midpoint between rest and press
-        threshold = (rest_avg + press_avg) / 2
+        # Get current angle and angle from baseline
+        current_angle = finger_angles.get(current_finger, 0.0)
+        baseline = self.baseline_angles.get(current_finger, 0.0)
+        angle_from_baseline = current_angle - baseline
 
-        self.thresholds[finger_name] = threshold
+        self.current_finger_angle = current_angle
+        self.current_finger_angle_from_baseline = angle_from_baseline
+
+        # Check if finger has reached threshold
+        if angle_from_baseline >= FINGER_PRESS_ANGLE_THRESHOLD:
+            if self.threshold_reached_time is None:
+                self.threshold_reached_time = current_time
+                print(f"{current_finger} reached threshold ({angle_from_baseline:.1f} degrees)")
+
+            # Check if held long enough
+            if current_time - self.threshold_reached_time >= self.hold_time_required:
+                self._calibrate_current_finger(current_angle, baseline, angle_from_baseline)
+                self._advance_to_next_finger()
+        else:
+            # Reset hold timer if finger moved back
+            if self.threshold_reached_time is not None:
+                self.threshold_reached_time = None
+
+        return True
+
+    def _calibrate_current_finger(self, current_angle: float, baseline: float, angle_from_baseline: float):
+        """Record calibration for the current finger."""
+        finger_name = self.get_current_finger()
+
+        # Store calibration data
+        self.angle_thresholds[finger_name] = FINGER_PRESS_ANGLE_THRESHOLD
         self.calibration_data[finger_name] = {
-            'rest_avg': rest_avg,
-            'press_avg': press_avg,
-            'threshold': threshold,
+            'baseline_angle': baseline,
+            'calibrated_angle': current_angle,
+            'angle_threshold': FINGER_PRESS_ANGLE_THRESHOLD,
+            'recorded_press_angle': angle_from_baseline,
         }
 
-        print(f"Calibrated {finger_name}: rest={rest_avg:.2f}, press={press_avg:.2f}, threshold={threshold:.2f}")
+        # Also update Y-position threshold for backward compatibility
+        # (This will be less accurate but provides a fallback)
+        self.thresholds[finger_name] = FINGER_PRESS_THRESHOLD
+
+        print(f"Calibrated {finger_name}: baseline={baseline:.1f}, press_angle={angle_from_baseline:.1f}")
+
+    def _advance_to_next_finger(self):
+        """Advance to next finger in calibration sequence."""
+        self.current_finger_index += 1
+        self.threshold_reached_time = None
+        self.current_finger_angle = 0.0
+        self.current_finger_angle_from_baseline = 0.0
+
+        if self.current_finger_index >= len(FINGER_NAMES):
+            self._complete_calibration()
+        else:
+            self.phase_start_time = time.time()
+            next_finger = self.get_current_finger()
+            print(f"Moving to next finger: {next_finger}")
 
     def _complete_calibration(self):
         """Complete the calibration process."""
@@ -234,13 +308,16 @@ class CalibrationManager:
         self.calibrating = False
         self.calibration_phase = 'idle'
         self.current_finger_index = 0
-        self.samples = {'rest': [], 'press': []}
+        self.baseline_samples = {name: [] for name in FINGER_NAMES}
+        self.threshold_reached_time = None
         print("Calibration cancelled.")
 
     def reset_calibration(self):
         """Reset all calibration data."""
         self.calibration_data = {}
         self.thresholds = {name: FINGER_PRESS_THRESHOLD for name in FINGER_NAMES}
+        self.angle_thresholds = {name: FINGER_PRESS_ANGLE_THRESHOLD for name in FINGER_NAMES}
+        self.baseline_angles = {name: None for name in FINGER_NAMES}
         self.is_calibrated = False
 
         if os.path.exists(self.calibration_file):
@@ -255,22 +332,31 @@ class CalibrationManager:
         if not self.calibrating:
             return ""
 
-        finger = self.get_current_finger_display()
-        finger_full = self.get_current_finger()
-
-        if not finger_full:
-            return ""
-
-        hand = "LEFT" if "left" in finger_full else "RIGHT"
-        finger_name = finger_full.split('_')[1].upper()
-
         if self.calibration_phase == 'waiting_hands':
-            return f"Place your {hand} hand above the sensor"
-        elif self.calibration_phase == 'rest':
-            return f"Keep {hand} {finger_name} finger RELAXED - collecting samples..."
-        elif self.calibration_phase == 'transitioning':
-            return f"Press SPACE, then PRESS {hand} {finger_name} finger DOWN"
-        elif self.calibration_phase == 'press':
-            return f"Hold {hand} {finger_name} finger PRESSED DOWN - collecting samples..."
+            return "Place BOTH hands above the sensor"
+
+        if self.calibration_phase == 'capturing_baseline':
+            return "Keep ALL fingers RELAXED - capturing baseline..."
+
+        if self.calibration_phase == 'calibrating_finger':
+            finger = self.get_current_finger_display()
+            finger_full = self.get_current_finger()
+
+            if not finger_full:
+                return ""
+
+            hand = "LEFT" if "left" in finger_full else "RIGHT"
+            finger_name = finger_full.split('_')[1].upper()
+
+            if self.threshold_reached_time is not None:
+                hold_progress = self._get_hold_progress()
+                return f"HOLD {hand} {finger_name} - {int(hold_progress * 100)}%"
+            else:
+                return f"Press {hand} {finger_name} down past {FINGER_PRESS_ANGLE_THRESHOLD} degrees"
 
         return ""
+
+    # Legacy method for compatibility
+    def confirm_phase_transition(self):
+        """Legacy method - no longer needed with auto-advance."""
+        pass

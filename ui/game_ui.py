@@ -374,11 +374,13 @@ class MenuUI:
         instructions = [
             "Calibration will help the game detect your finger presses accurately.",
             "",
-            "During calibration:",
-            "1. Place your hands comfortably above the Leap Motion sensor",
-            "2. For each finger, you'll be asked to keep it RELAXED",
-            "3. Then you'll be asked to PRESS it down",
-            "4. The game will record both positions to set thresholds",
+            "New Angle-Based Calibration:",
+            "1. Place BOTH hands comfortably above the Leap Motion sensor",
+            "2. Keep ALL fingers RELAXED while baseline is captured",
+            "3. When prompted, press each finger down past 30 degrees",
+            "4. Hold briefly - it will auto-advance to the next finger",
+            "",
+            "No need to press any keys between fingers!",
             "",
             "Press SPACE to begin calibration",
             "Press ESC to return to menu",
@@ -388,13 +390,15 @@ class MenuUI:
             instructions.append("")
             instructions.append("(You have existing calibration data that will be replaced)")
 
-        y = 200
+        y = 180
         for line in instructions:
             if line:
                 color = CALIBRATION_TEXT if not line.startswith("(") else YELLOW
+                if "30 degrees" in line or "auto-advance" in line:
+                    color = (100, 255, 100)  # Highlight key info
                 text = self.fonts['small'].render(line, True, color)
                 self.surface.blit(text, (100, y))
-            y += 30
+            y += 28
 
     def move_selection(self, direction: int, max_options: int, has_calibration: bool):
         """Move menu selection."""

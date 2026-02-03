@@ -102,9 +102,28 @@ class LeapController:
                 finger_name = finger_names[i]
                 tip = digit.distal.next_joint
 
+                # Extract bone directions for angle calculation
+                # Proximal bone direction
+                proximal = digit.proximal
+                proximal_dir = (proximal.next_joint.x - proximal.prev_joint.x,
+                               proximal.next_joint.y - proximal.prev_joint.y,
+                               proximal.next_joint.z - proximal.prev_joint.z)
+
+                # Intermediate bone direction (or distal for thumb)
+                if finger_name == 'thumb':
+                    # Thumb uses distal bone
+                    intermediate = digit.distal
+                else:
+                    intermediate = digit.intermediate
+                intermediate_dir = (intermediate.next_joint.x - intermediate.prev_joint.x,
+                                   intermediate.next_joint.y - intermediate.prev_joint.y,
+                                   intermediate.next_joint.z - intermediate.prev_joint.z)
+
                 fingers[finger_name] = {
                     'tip_position': (tip.x, tip.y, tip.z),
                     'extended': digit.is_extended,
+                    'proximal_direction': proximal_dir,
+                    'intermediate_direction': intermediate_dir,
                 }
 
             palm = hand.palm
@@ -203,6 +222,8 @@ class SimulatedLeapController(LeapController):
             self.hands_data = {'left': None, 'right': None}
             return
 
+        import math
+
         for hand_type in ['left', 'right']:
             fingers = {}
             finger_names = ['thumb', 'index', 'middle', 'ring', 'pinky']
@@ -212,9 +233,23 @@ class SimulatedLeapController(LeapController):
                 is_pressed = self.simulated_finger_states.get(key, False)
                 tip_y = self.base_finger_y + (-50.0 if is_pressed else 0.0)
 
+                # Simulate bone directions - when pressed, angle between bones is ~45 degrees
+                # When relaxed, bones are roughly aligned (angle ~0)
+                if is_pressed:
+                    # Pressed: proximal points up, intermediate points down-forward (45 degree angle)
+                    proximal_dir = (0.0, 1.0, 0.0)
+                    angle_rad = math.radians(45)
+                    intermediate_dir = (0.0, math.cos(angle_rad), math.sin(angle_rad))
+                else:
+                    # Relaxed: both roughly pointing up
+                    proximal_dir = (0.0, 1.0, 0.0)
+                    intermediate_dir = (0.0, 1.0, 0.1)  # Slight forward tilt when relaxed
+
                 fingers[finger_name] = {
                     'tip_position': (0.0, tip_y, 0.0),
                     'extended': not is_pressed,
+                    'proximal_direction': proximal_dir,
+                    'intermediate_direction': intermediate_dir,
                 }
 
             self.hands_data[hand_type] = {

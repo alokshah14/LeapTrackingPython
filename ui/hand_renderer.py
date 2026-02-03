@@ -211,6 +211,10 @@ class CalibrationHandRenderer(HandRenderer):
         self.current_calibration_finger = None
         self.calibration_phase = 'idle'
         self.progress = 0.0
+        self.current_angle = 0.0
+        self.angle_from_baseline = 0.0
+        self.threshold_angle = 30.0
+        self.all_finger_angles = {}
 
     def set_calibration_state(self, finger_name: str, phase: str, progress: float):
         """
@@ -218,7 +222,7 @@ class CalibrationHandRenderer(HandRenderer):
 
         Args:
             finger_name: Name of finger being calibrated
-            phase: 'rest' or 'press'
+            phase: Current calibration phase
             progress: 0.0 to 1.0 progress of current phase
         """
         self.current_calibration_finger = finger_name
@@ -231,9 +235,26 @@ class CalibrationHandRenderer(HandRenderer):
         else:
             self.highlighted_fingers.clear()
 
+    def set_angle_data(self, current_angle: float, angle_from_baseline: float,
+                       threshold_angle: float, all_angles: Dict[str, float] = None):
+        """
+        Set angle data for display.
+
+        Args:
+            current_angle: Current absolute angle of the finger
+            angle_from_baseline: Angle relative to baseline (rest position)
+            threshold_angle: Target threshold angle for calibration
+            all_angles: Dictionary of all finger angles (optional)
+        """
+        self.current_angle = current_angle
+        self.angle_from_baseline = angle_from_baseline
+        self.threshold_angle = threshold_angle
+        if all_angles:
+            self.all_finger_angles = all_angles
+
     def draw_calibration_overlay(self, instructions: str, status: Dict):
-        """Draw calibration-specific UI overlay."""
-        # Progress bar
+        """Draw calibration-specific UI overlay with angle readout."""
+        # Progress bar for overall calibration
         bar_width = 400
         bar_height = 20
         bar_x = (WINDOW_WIDTH - bar_width) // 2
@@ -261,6 +282,94 @@ class CalibrationHandRenderer(HandRenderer):
         self.surface.blit(inst_text, (WINDOW_WIDTH // 2 - inst_text.get_width() // 2, bar_y - 40))
 
         # Phase indicator
-        phase_text = f"Phase: {status['phase'].upper()} ({status['samples_collected']}/{status['samples_needed']} samples)"
+        phase = status.get('phase', 'idle')
+        if phase == 'capturing_baseline':
+            phase_text = "Capturing baseline - keep fingers relaxed..."
+        elif phase == 'calibrating_finger':
+            phase_text = f"Calibrating: {status.get('current_finger_display', '')}"
+        elif phase == 'waiting_hands':
+            phase_text = "Waiting for hands..."
+        else:
+            phase_text = f"Phase: {phase.upper()}"
+
         phase_render = font.render(phase_text, True, (150, 150, 200))
         self.surface.blit(phase_render, (WINDOW_WIDTH // 2 - phase_render.get_width() // 2, bar_y + bar_height + 25))
+
+        # Draw angle readout if calibrating a finger
+        if phase == 'calibrating_finger':
+            self._draw_angle_readout(status)
+
+    def _draw_angle_readout(self, status: Dict):
+        """Draw the angle readout gauge and numerical display."""
+        # Position for angle display
+        gauge_x = WINDOW_WIDTH // 2
+        gauge_y = 250
+
+        angle = status.get('angle_from_baseline', 0.0)
+        threshold = status.get('threshold_angle', 30.0)
+        threshold_reached = status.get('threshold_reached', False)
+        hold_progress = status.get('hold_progress', 0.0)
+
+        # Draw large angle number
+        large_font = pygame.font.Font(None, 120)
+        angle_color = (100, 255, 100) if angle >= threshold else WHITE
+        if threshold_reached:
+            angle_color = (100, 255, 100)
+
+        angle_text = f"{angle:.1f}"
+        angle_render = large_font.render(angle_text, True, angle_color)
+        self.surface.blit(angle_render, (gauge_x - angle_render.get_width() // 2, gauge_y - 60))
+
+        # Draw "degrees" label
+        small_font = pygame.font.Font(None, 36)
+        deg_text = small_font.render("degrees", True, (150, 150, 200))
+        self.surface.blit(deg_text, (gauge_x - deg_text.get_width() // 2, gauge_y + 50))
+
+        # Draw threshold indicator
+        threshold_font = pygame.font.Font(None, 28)
+        threshold_text = f"Target: {threshold:.0f} degrees"
+        threshold_render = threshold_font.render(threshold_text, True, (200, 200, 100))
+        self.surface.blit(threshold_render, (gauge_x - threshold_render.get_width() // 2, gauge_y + 85))
+
+        # Draw visual gauge bar
+        gauge_width = 300
+        gauge_height = 30
+        gauge_bar_x = gauge_x - gauge_width // 2
+        gauge_bar_y = gauge_y + 120
+
+        # Background
+        pygame.draw.rect(self.surface, (40, 40, 60), (gauge_bar_x, gauge_bar_y, gauge_width, gauge_height))
+
+        # Fill based on angle (0-60 degrees range for display)
+        max_display_angle = 60.0
+        fill_ratio = min(1.0, max(0.0, angle / max_display_angle))
+        fill_width = int(gauge_width * fill_ratio)
+
+        # Color gradient from blue to green as angle increases
+        if angle < threshold:
+            fill_color = (100, 150, 255)  # Blue
+        else:
+            fill_color = (100, 255, 100)  # Green
+
+        pygame.draw.rect(self.surface, fill_color, (gauge_bar_x, gauge_bar_y, fill_width, gauge_height))
+
+        # Draw threshold marker
+        threshold_x = gauge_bar_x + int(gauge_width * (threshold / max_display_angle))
+        pygame.draw.line(self.surface, (255, 255, 0), (threshold_x, gauge_bar_y - 5),
+                        (threshold_x, gauge_bar_y + gauge_height + 5), 3)
+
+        # Border
+        pygame.draw.rect(self.surface, WHITE, (gauge_bar_x, gauge_bar_y, gauge_width, gauge_height), 2)
+
+        # Draw hold progress bar if threshold reached
+        if threshold_reached and hold_progress > 0:
+            hold_bar_y = gauge_bar_y + gauge_height + 15
+            hold_bar_height = 10
+
+            pygame.draw.rect(self.surface, (40, 40, 60), (gauge_bar_x, hold_bar_y, gauge_width, hold_bar_height))
+            hold_fill_width = int(gauge_width * hold_progress)
+            pygame.draw.rect(self.surface, (255, 200, 100), (gauge_bar_x, hold_bar_y, hold_fill_width, hold_bar_height))
+            pygame.draw.rect(self.surface, WHITE, (gauge_bar_x, hold_bar_y, gauge_width, hold_bar_height), 1)
+
+            hold_text = small_font.render("HOLD", True, (255, 200, 100))
+            self.surface.blit(hold_text, (gauge_x - hold_text.get_width() // 2, hold_bar_y + hold_bar_height + 5))
