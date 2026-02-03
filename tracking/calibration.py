@@ -3,11 +3,15 @@
 import json
 import os
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from game.constants import (
     CALIBRATION_FILE, FINGER_NAMES, FINGER_DISPLAY_NAMES,
     FINGER_PRESS_THRESHOLD, FINGER_PRESS_ANGLE_THRESHOLD
 )
+
+# Finger groups by hand
+LEFT_FINGERS = ['left_pinky', 'left_ring', 'left_middle', 'left_index', 'left_thumb']
+RIGHT_FINGERS = ['right_thumb', 'right_index', 'right_middle', 'right_ring', 'right_pinky']
 
 
 class CalibrationManager:
@@ -29,12 +33,20 @@ class CalibrationManager:
         # Calibration process state
         self.calibrating = False
         self.current_finger_index = 0
-        self.calibration_phase = 'idle'  # 'waiting_hands', 'capturing_baseline', 'calibrating_finger', 'complete'
+        self.calibration_phase = 'idle'
+        # Phases: 'countdown', 'baseline_left', 'baseline_right', 'calibrating_finger', 'complete'
+
+        # Countdown state (time to place hands after pressing SPACE)
+        self.countdown_start = 0
+        self.countdown_duration = 5.0  # 5 seconds to place hands
 
         # Baseline capture state
         self.baseline_samples = {name: [] for name in FINGER_NAMES}
-        self.baseline_sample_count = 30  # Samples needed for baseline
-        self.baseline_captured = False
+        self.baseline_sample_count = 60  # More samples over time
+        self.baseline_duration = 10.0  # 10 seconds for baseline capture
+        self.baseline_start_time = 0
+        self.left_baseline_captured = False
+        self.right_baseline_captured = False
 
         # Current finger angle tracking
         self.current_finger_angle = 0.0
@@ -42,7 +54,7 @@ class CalibrationManager:
 
         # Timing
         self.last_sample_time = 0
-        self.sample_delay = 0.03  # 30ms between samples
+        self.sample_delay = 0.05  # 50ms between samples
         self.phase_start_time = 0
 
         # Auto-advance hold time (must hold at threshold for this long)
@@ -61,7 +73,7 @@ class CalibrationManager:
             with open(self.calibration_file, 'r') as f:
                 data = json.load(f)
 
-            self.calibration_data = data
+            self.calibration_data = data.get('calibration_data', {})
             self.thresholds = data.get('thresholds', self.thresholds)
             self.angle_thresholds = data.get('angle_thresholds', self.angle_thresholds)
             self.baseline_angles = data.get('baseline_angles', self.baseline_angles)
@@ -107,18 +119,20 @@ class CalibrationManager:
         return self.baseline_angles.get(finger_name)
 
     def start_calibration(self):
-        """Start the calibration process."""
+        """Start the calibration process with countdown."""
         self.calibrating = True
         self.current_finger_index = 0
-        self.calibration_phase = 'waiting_hands'
+        self.calibration_phase = 'countdown'
+        self.countdown_start = time.time()
         self.baseline_samples = {name: [] for name in FINGER_NAMES}
-        self.baseline_captured = False
+        self.left_baseline_captured = False
+        self.right_baseline_captured = False
         self.calibration_data = {}
         self.phase_start_time = time.time()
         self.threshold_reached_time = None
         self.current_finger_angle = 0.0
         self.current_finger_angle_from_baseline = 0.0
-        print("Starting angle-based calibration process...")
+        print("Starting calibration... Place your LEFT hand above the sensor.")
 
     def get_current_finger(self) -> Optional[str]:
         """Get the finger currently being calibrated."""
@@ -132,6 +146,20 @@ class CalibrationManager:
             return FINGER_DISPLAY_NAMES[self.current_finger_index]
         return ""
 
+    def get_countdown_remaining(self) -> float:
+        """Get remaining countdown time in seconds."""
+        if self.calibration_phase != 'countdown':
+            return 0
+        elapsed = time.time() - self.countdown_start
+        return max(0, self.countdown_duration - elapsed)
+
+    def get_baseline_time_remaining(self) -> float:
+        """Get remaining baseline capture time in seconds."""
+        if self.calibration_phase not in ['baseline_left', 'baseline_right']:
+            return 0
+        elapsed = time.time() - self.baseline_start_time
+        return max(0, self.baseline_duration - elapsed)
+
     def get_calibration_status(self) -> Dict:
         """Get current calibration status."""
         return {
@@ -141,7 +169,10 @@ class CalibrationManager:
             'finger_index': self.current_finger_index,
             'total_fingers': len(FINGER_NAMES),
             'phase': self.calibration_phase,
-            'baseline_captured': self.baseline_captured,
+            'countdown_remaining': self.get_countdown_remaining(),
+            'baseline_time_remaining': self.get_baseline_time_remaining(),
+            'left_baseline_captured': self.left_baseline_captured,
+            'right_baseline_captured': self.right_baseline_captured,
             'current_angle': self.current_finger_angle,
             'angle_from_baseline': self.current_finger_angle_from_baseline,
             'threshold_angle': FINGER_PRESS_ANGLE_THRESHOLD,
@@ -173,21 +204,22 @@ class CalibrationManager:
 
         current_time = time.time()
 
-        # Phase: Waiting for hands
-        if self.calibration_phase == 'waiting_hands':
-            # Check if both hands are visible
-            left_visible = hand_data.get('left') is not None
-            right_visible = hand_data.get('right') is not None
-
-            if left_visible and right_visible:
-                self.calibration_phase = 'capturing_baseline'
-                self.phase_start_time = current_time
-                print("Both hands detected. Capturing baseline - keep all fingers RELAXED...")
+        # Phase: Countdown before starting
+        if self.calibration_phase == 'countdown':
+            if current_time - self.countdown_start >= self.countdown_duration:
+                # Countdown complete, start baseline capture for left hand
+                self.calibration_phase = 'baseline_left'
+                self.baseline_start_time = current_time
+                print("Countdown complete. Capturing LEFT hand baseline - keep fingers RELAXED...")
             return True
 
-        # Phase: Capturing baseline for all fingers
-        if self.calibration_phase == 'capturing_baseline':
-            return self._update_baseline_capture(hand_data, finger_angles, current_time)
+        # Phase: Capturing baseline for LEFT hand
+        if self.calibration_phase == 'baseline_left':
+            return self._update_baseline_capture(hand_data, finger_angles, current_time, 'left')
+
+        # Phase: Capturing baseline for RIGHT hand
+        if self.calibration_phase == 'baseline_right':
+            return self._update_baseline_capture(hand_data, finger_angles, current_time, 'right')
 
         # Phase: Calibrating individual fingers
         if self.calibration_phase == 'calibrating_finger':
@@ -195,32 +227,53 @@ class CalibrationManager:
 
         return True
 
-    def _update_baseline_capture(self, hand_data: Dict, finger_angles: Dict, current_time: float) -> bool:
-        """Capture baseline angles for all fingers."""
-        # Collect samples for all fingers
-        if current_time - self.last_sample_time >= self.sample_delay:
-            self.last_sample_time = current_time
+    def _update_baseline_capture(self, hand_data: Dict, finger_angles: Dict,
+                                  current_time: float, hand_type: str) -> bool:
+        """Capture baseline angles for one hand."""
+        fingers = LEFT_FINGERS if hand_type == 'left' else RIGHT_FINGERS
+        hand = hand_data.get(hand_type)
 
-            for finger_name in FINGER_NAMES:
-                angle = finger_angles.get(finger_name, 0.0)
-                self.baseline_samples[finger_name].append(angle)
-
-            # Check if we have enough samples for all fingers
-            min_samples = min(len(samples) for samples in self.baseline_samples.values())
-
-            if min_samples >= self.baseline_sample_count:
-                # Calculate baseline averages
-                for finger_name in FINGER_NAMES:
-                    samples = self.baseline_samples[finger_name]
+        # Check if time is up
+        time_elapsed = current_time - self.baseline_start_time
+        if time_elapsed >= self.baseline_duration:
+            # Calculate baseline averages for this hand
+            for finger_name in fingers:
+                samples = self.baseline_samples.get(finger_name, [])
+                if samples:
                     avg = sum(samples) / len(samples)
                     self.baseline_angles[finger_name] = avg
-                    print(f"Baseline for {finger_name}: {avg:.1f} degrees")
+                    print(f"Baseline for {finger_name}: {avg:.1f} degrees ({len(samples)} samples)")
+                else:
+                    # No samples - use 0 as default
+                    self.baseline_angles[finger_name] = 0.0
+                    print(f"Warning: No samples for {finger_name}, using 0 as baseline")
 
-                self.baseline_captured = True
+            # Move to next phase
+            if hand_type == 'left':
+                self.left_baseline_captured = True
+                self.calibration_phase = 'countdown_right'
+                self.countdown_start = current_time
+                print("LEFT hand baseline captured. Press fingers when ready for RIGHT hand baseline.")
+                # Actually, let's just transition with a short pause
+                self.calibration_phase = 'baseline_right'
+                self.baseline_start_time = current_time
+                print("Now capturing RIGHT hand baseline - keep fingers RELAXED...")
+            else:
+                self.right_baseline_captured = True
                 self.calibration_phase = 'calibrating_finger'
+                self.current_finger_index = 0  # Start with first finger (left_pinky)
                 self.phase_start_time = current_time
-                print(f"Baseline captured. Now calibrating {self.get_current_finger()}...")
-                print(f"Press finger down past {FINGER_PRESS_ANGLE_THRESHOLD} degrees to calibrate.")
+                print("Baselines captured. Now calibrating individual fingers...")
+                print(f"Press {self.get_current_finger()} down past {FINGER_PRESS_ANGLE_THRESHOLD} degrees")
+
+            return True
+
+        # Collect samples if hand is visible
+        if hand is not None and current_time - self.last_sample_time >= self.sample_delay:
+            self.last_sample_time = current_time
+            for finger_name in fingers:
+                angle = finger_angles.get(finger_name, 0.0)
+                self.baseline_samples[finger_name].append(angle)
 
         return True
 
@@ -275,10 +328,6 @@ class CalibrationManager:
             'recorded_press_angle': angle_from_baseline,
         }
 
-        # Also update Y-position threshold for backward compatibility
-        # (This will be less accurate but provides a fallback)
-        self.thresholds[finger_name] = FINGER_PRESS_THRESHOLD
-
         print(f"Calibrated {finger_name}: baseline={baseline:.1f}, press_angle={angle_from_baseline:.1f}")
 
     def _advance_to_next_finger(self):
@@ -332,11 +381,17 @@ class CalibrationManager:
         if not self.calibrating:
             return ""
 
-        if self.calibration_phase == 'waiting_hands':
-            return "Place BOTH hands above the sensor"
+        if self.calibration_phase == 'countdown':
+            remaining = int(self.get_countdown_remaining()) + 1
+            return f"Place your LEFT hand above the sensor... {remaining}"
 
-        if self.calibration_phase == 'capturing_baseline':
-            return "Keep ALL fingers RELAXED - capturing baseline..."
+        if self.calibration_phase == 'baseline_left':
+            remaining = int(self.get_baseline_time_remaining()) + 1
+            return f"LEFT hand: Keep ALL fingers RELAXED ({remaining}s)"
+
+        if self.calibration_phase == 'baseline_right':
+            remaining = int(self.get_baseline_time_remaining()) + 1
+            return f"RIGHT hand: Keep ALL fingers RELAXED ({remaining}s)"
 
         if self.calibration_phase == 'calibrating_finger':
             finger = self.get_current_finger_display()

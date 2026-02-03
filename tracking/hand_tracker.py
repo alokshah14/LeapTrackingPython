@@ -84,10 +84,20 @@ class HandTracker:
                     )
                     self.finger_angles[full_name] = angle
 
-                # Check for press using calibration threshold
-                threshold = self.calibration.get_threshold(full_name)
+                # Check for press using ANGLE-based threshold
+                baseline_angle = self.calibration.get_baseline_angle(full_name)
+                angle_threshold = self.calibration.get_angle_threshold(full_name)
+
+                # Calculate angle from baseline
+                current_angle = self.finger_angles.get(full_name, 0.0)
+                if baseline_angle is not None:
+                    angle_from_baseline = current_angle - baseline_angle
+                else:
+                    # Fallback to raw angle if no baseline
+                    angle_from_baseline = current_angle
+
                 was_pressed = self.finger_states[full_name]
-                is_pressed = relative_y < threshold
+                is_pressed = angle_from_baseline >= angle_threshold  # 30 degrees by default
 
                 # Detect new press with debounce
                 if is_pressed and not was_pressed:

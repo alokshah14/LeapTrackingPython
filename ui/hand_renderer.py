@@ -341,44 +341,71 @@ class CalibrationHandRenderer(HandRenderer):
         bar_x = (WINDOW_WIDTH - bar_width) // 2
         bar_y = GAME_AREA_BOTTOM + 50
 
-        # Background
-        pygame.draw.rect(self.surface, (40, 40, 60), (bar_x, bar_y, bar_width, bar_height))
-
-        # Progress fill
-        fill_width = int(bar_width * status['progress'])
-        pygame.draw.rect(self.surface, (100, 200, 100), (bar_x, bar_y, fill_width, bar_height))
-
-        # Border
-        pygame.draw.rect(self.surface, WHITE, (bar_x, bar_y, bar_width, bar_height), 2)
-
-        # Progress text
+        phase = status.get('phase', 'idle')
         font = pygame.font.Font(None, 24)
-        progress_text = f"Finger {status['finger_index'] + 1} of {status['total_fingers']}"
-        text = font.render(progress_text, True, WHITE)
-        self.surface.blit(text, (bar_x + bar_width // 2 - text.get_width() // 2, bar_y + bar_height + 5))
+        large_font = pygame.font.Font(None, 72)
 
         # Instructions
         inst_font = pygame.font.Font(None, 36)
         inst_text = inst_font.render(instructions, True, (255, 255, 100))
         self.surface.blit(inst_text, (WINDOW_WIDTH // 2 - inst_text.get_width() // 2, bar_y - 40))
 
-        # Phase indicator
-        phase = status.get('phase', 'idle')
-        if phase == 'capturing_baseline':
-            phase_text = "Capturing baseline - keep fingers relaxed..."
+        # Phase-specific displays
+        if phase == 'countdown':
+            # Big countdown number
+            remaining = status.get('countdown_remaining', 0)
+            countdown_text = large_font.render(f"{int(remaining) + 1}", True, (255, 200, 100))
+            self.surface.blit(countdown_text, (WINDOW_WIDTH // 2 - countdown_text.get_width() // 2, 200))
+
+            sub_text = font.render("Get ready to place your LEFT hand...", True, (150, 150, 200))
+            self.surface.blit(sub_text, (WINDOW_WIDTH // 2 - sub_text.get_width() // 2, 280))
+
+        elif phase in ['baseline_left', 'baseline_right']:
+            # Baseline capture progress
+            remaining = status.get('baseline_time_remaining', 0)
+            total = 10.0  # baseline duration
+            progress = 1.0 - (remaining / total)
+
+            # Timer display
+            timer_text = large_font.render(f"{int(remaining) + 1}s", True, (100, 200, 255))
+            self.surface.blit(timer_text, (WINDOW_WIDTH // 2 - timer_text.get_width() // 2, 200))
+
+            hand_name = "LEFT" if phase == 'baseline_left' else "RIGHT"
+            sub_text = font.render(f"Capturing {hand_name} hand baseline - keep fingers RELAXED", True, (150, 150, 200))
+            self.surface.blit(sub_text, (WINDOW_WIDTH // 2 - sub_text.get_width() // 2, 280))
+
+            # Progress bar for baseline
+            pygame.draw.rect(self.surface, (40, 40, 60), (bar_x, bar_y, bar_width, bar_height))
+            fill_width = int(bar_width * progress)
+            pygame.draw.rect(self.surface, (100, 200, 255), (bar_x, bar_y, fill_width, bar_height))
+            pygame.draw.rect(self.surface, WHITE, (bar_x, bar_y, bar_width, bar_height), 2)
+
+            # Checkmarks for completed baselines
+            if status.get('left_baseline_captured'):
+                check_text = font.render("LEFT baseline captured", True, (100, 255, 100))
+                self.surface.blit(check_text, (WINDOW_WIDTH // 2 - check_text.get_width() // 2, bar_y + bar_height + 10))
+
         elif phase == 'calibrating_finger':
-            phase_text = f"Calibrating: {status.get('current_finger_display', '')}"
-        elif phase == 'waiting_hands':
-            phase_text = "Waiting for hands..."
-        else:
-            phase_text = f"Phase: {phase.upper()}"
+            # Overall progress bar
+            pygame.draw.rect(self.surface, (40, 40, 60), (bar_x, bar_y, bar_width, bar_height))
+            fill_width = int(bar_width * status['progress'])
+            pygame.draw.rect(self.surface, (100, 200, 100), (bar_x, bar_y, fill_width, bar_height))
+            pygame.draw.rect(self.surface, WHITE, (bar_x, bar_y, bar_width, bar_height), 2)
 
-        phase_render = font.render(phase_text, True, (150, 150, 200))
-        self.surface.blit(phase_render, (WINDOW_WIDTH // 2 - phase_render.get_width() // 2, bar_y + bar_height + 25))
+            # Progress text
+            progress_text = f"Finger {status['finger_index'] + 1} of {status['total_fingers']}"
+            text = font.render(progress_text, True, WHITE)
+            self.surface.blit(text, (bar_x + bar_width // 2 - text.get_width() // 2, bar_y + bar_height + 5))
 
-        # Draw angle readout if calibrating a finger
-        if phase == 'calibrating_finger':
+            # Draw angle readout
             self._draw_angle_readout(status)
+
+        else:
+            # Default progress bar
+            pygame.draw.rect(self.surface, (40, 40, 60), (bar_x, bar_y, bar_width, bar_height))
+            fill_width = int(bar_width * status['progress'])
+            pygame.draw.rect(self.surface, (100, 200, 100), (bar_x, bar_y, fill_width, bar_height))
+            pygame.draw.rect(self.surface, WHITE, (bar_x, bar_y, bar_width, bar_height), 2)
 
     def _draw_angle_readout(self, status: Dict):
         """Draw the angle readout gauge and numerical display."""

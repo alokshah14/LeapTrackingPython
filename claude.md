@@ -229,3 +229,28 @@ Left Hand:              Right Hand:
    - Added `M` key to toggle sounds
    - Added `B` key to toggle angle bars
    - Pass finger angles to hand renderer during gameplay
+
+#### Bug Fixes: Angle-Based Firing & Single-Person Calibration
+**Issues Reported**:
+1. Missiles fired even when fingers weren't at 30 degrees
+2. Calibration required both hands simultaneously (couldn't do alone)
+
+**Fixes Made**:
+1. **hand_tracker.py**:
+   - Changed press detection to use angle-based threshold (30 degrees from baseline)
+   - Was using old Y-position method, now uses `angle_from_baseline >= angle_threshold`
+
+2. **calibration.py** (Major Update):
+   - Added 5-second countdown after pressing SPACE (time to place hand)
+   - Captures LEFT hand baseline first (10 seconds)
+   - Then captures RIGHT hand baseline (10 seconds)
+   - No button presses needed during calibration
+   - Single person can now calibrate alone
+
+3. **hand_renderer.py**:
+   - Updated calibration overlay to show countdown timer
+   - Shows baseline capture progress with timer
+   - Displays which hand baseline is being captured
+
+4. **game_ui.py**:
+   - Updated calibration menu instructions for new flow
