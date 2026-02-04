@@ -23,15 +23,23 @@ class TrialRecord:
     pressed_finger: str
     is_wrong_finger: bool
 
-    # Biomechanical metrics
+    # Timing
     reaction_time_ms: float
-    motion_leakage_ratio: float
-    coupled_keypress: bool
-    is_clean_trial: bool
 
-    # Path lengths
+    # Position-based metrics (raw 3D fingertip movement)
+    motion_leakage_ratio: float
     target_path_length_mm: float
     total_non_target_path_length_mm: float
+    is_clean_trial: bool
+
+    # Angle-based metrics (finger flexion, immune to hand repositioning)
+    angle_based_mlr: float
+    target_angle_path_deg: float
+    total_non_target_angle_path_deg: float
+    is_clean_trial_angle: bool
+
+    # Other
+    coupled_keypress: bool
 
 
 @dataclass
@@ -47,16 +55,21 @@ class SessionSummary:
     correct_trials: int
     wrong_finger_trials: int
     clean_trials: int
+    clean_trials_angle: int
     coupled_keypress_trials: int
 
     # Rates (percentages)
     wrong_finger_error_rate: float
     clean_trial_rate: float
+    clean_trial_rate_angle: float
     coupled_keypress_rate: float
 
-    # Averages
+    # Position-based averages
     avg_reaction_time_ms: float
     avg_motion_leakage_ratio: float
+
+    # Angle-based averages
+    avg_angle_based_mlr: float
 
     # Score
     final_score: int
@@ -118,13 +131,22 @@ class TrialSummaryExporter:
             pressed_finger=pressed_finger,
             is_wrong_finger=trial_metrics.is_wrong_finger,
             reaction_time_ms=round(trial_metrics.reaction_time_ms, 2),
+            # Position-based metrics
             motion_leakage_ratio=round(trial_metrics.motion_leakage_ratio, 4),
-            coupled_keypress=trial_metrics.coupled_keypress,
-            is_clean_trial=trial_metrics.is_clean_trial,
             target_path_length_mm=round(trial_metrics.target_path_length, 2),
             total_non_target_path_length_mm=round(
                 sum(trial_metrics.non_target_path_lengths.values()), 2
-            )
+            ),
+            is_clean_trial=trial_metrics.is_clean_trial,
+            # Angle-based metrics
+            angle_based_mlr=round(trial_metrics.angle_based_mlr, 4),
+            target_angle_path_deg=round(trial_metrics.target_angle_path, 2),
+            total_non_target_angle_path_deg=round(
+                sum(trial_metrics.non_target_angle_paths.values()), 2
+            ),
+            is_clean_trial_angle=trial_metrics.is_clean_trial_angle,
+            # Other
+            coupled_keypress=trial_metrics.coupled_keypress
         )
 
         self.trials.append(trial)
@@ -143,23 +165,32 @@ class TrialSummaryExporter:
                 correct_trials=0,
                 wrong_finger_trials=0,
                 clean_trials=0,
+                clean_trials_angle=0,
                 coupled_keypress_trials=0,
                 wrong_finger_error_rate=0.0,
                 clean_trial_rate=0.0,
+                clean_trial_rate_angle=0.0,
                 coupled_keypress_rate=0.0,
                 avg_reaction_time_ms=0.0,
                 avg_motion_leakage_ratio=0.0,
+                avg_angle_based_mlr=0.0,
                 final_score=final_score
             )
 
         wrong_finger_count = sum(1 for t in self.trials if t.is_wrong_finger)
         clean_count = sum(1 for t in self.trials if t.is_clean_trial)
+        clean_count_angle = sum(1 for t in self.trials if t.is_clean_trial_angle)
         coupled_count = sum(1 for t in self.trials if t.coupled_keypress)
 
-        # Filter valid MLR values (not inf)
+        # Filter valid position-based MLR values (not inf)
         valid_mlr = [t.motion_leakage_ratio for t in self.trials
                      if t.motion_leakage_ratio != float('inf')]
         avg_mlr = sum(valid_mlr) / len(valid_mlr) if valid_mlr else 0.0
+
+        # Filter valid angle-based MLR values (not inf)
+        valid_angle_mlr = [t.angle_based_mlr for t in self.trials
+                          if t.angle_based_mlr != float('inf')]
+        avg_angle_mlr = sum(valid_angle_mlr) / len(valid_angle_mlr) if valid_angle_mlr else 0.0
 
         # Filter valid reaction times (positive)
         valid_rt = [t.reaction_time_ms for t in self.trials if t.reaction_time_ms > 0]
@@ -177,12 +208,15 @@ class TrialSummaryExporter:
             correct_trials=total - wrong_finger_count,
             wrong_finger_trials=wrong_finger_count,
             clean_trials=clean_count,
+            clean_trials_angle=clean_count_angle,
             coupled_keypress_trials=coupled_count,
             wrong_finger_error_rate=round((wrong_finger_count / total) * 100, 2),
             clean_trial_rate=round((clean_count / total) * 100, 2),
+            clean_trial_rate_angle=round((clean_count_angle / total) * 100, 2),
             coupled_keypress_rate=round((coupled_count / total) * 100, 2),
             avg_reaction_time_ms=round(avg_rt, 2),
             avg_motion_leakage_ratio=round(avg_mlr, 4),
+            avg_angle_based_mlr=round(avg_angle_mlr, 4),
             final_score=final_score
         )
 
@@ -216,12 +250,16 @@ class TrialSummaryExporter:
         print(f"  CSV:  {csv_path}")
         print(f"  JSON: {json_path}")
         print(f"\nSession Statistics:")
-        print(f"  Total Trials:           {summary.total_trials}")
-        print(f"  Wrong-Finger Error Rate: {summary.wrong_finger_error_rate}%")
-        print(f"  Clean Trial Rate:        {summary.clean_trial_rate}%")
-        print(f"  Coupled-Keypress Rate:   {summary.coupled_keypress_rate}%")
-        print(f"  Avg Reaction Time:       {summary.avg_reaction_time_ms} ms")
-        print(f"  Avg MLR:                 {summary.avg_motion_leakage_ratio}")
+        print(f"  Total Trials:             {summary.total_trials}")
+        print(f"  Wrong-Finger Error Rate:  {summary.wrong_finger_error_rate}%")
+        print(f"  Coupled-Keypress Rate:    {summary.coupled_keypress_rate}%")
+        print(f"  Avg Reaction Time:        {summary.avg_reaction_time_ms} ms")
+        print(f"  --- Position-based ---")
+        print(f"  Clean Trial Rate:         {summary.clean_trial_rate}%")
+        print(f"  Avg MLR:                  {summary.avg_motion_leakage_ratio}")
+        print(f"  --- Angle-based ---")
+        print(f"  Clean Trial Rate (angle): {summary.clean_trial_rate_angle}%")
+        print(f"  Avg MLR (angle):          {summary.avg_angle_based_mlr}")
 
         # Reset for next session
         result = {"csv": csv_path, "json": json_path}
@@ -246,11 +284,17 @@ class TrialSummaryExporter:
                 'pressed_finger',
                 'is_wrong_finger',
                 'reaction_time_ms',
-                'motion_leakage_ratio',
                 'coupled_keypress',
-                'is_clean_trial',
-                'target_path_length_mm',
-                'total_non_target_path_length_mm'
+                # Position-based
+                'pos_mlr',
+                'pos_target_path_mm',
+                'pos_non_target_path_mm',
+                'is_clean_trial_pos',
+                # Angle-based
+                'angle_mlr',
+                'angle_target_path_deg',
+                'angle_non_target_path_deg',
+                'is_clean_trial_angle'
             ])
 
             # Write trial rows
@@ -263,11 +307,17 @@ class TrialSummaryExporter:
                     trial.pressed_finger,
                     trial.is_wrong_finger,
                     trial.reaction_time_ms,
-                    trial.motion_leakage_ratio,
                     trial.coupled_keypress,
-                    trial.is_clean_trial,
+                    # Position-based
+                    trial.motion_leakage_ratio,
                     trial.target_path_length_mm,
-                    trial.total_non_target_path_length_mm
+                    trial.total_non_target_path_length_mm,
+                    trial.is_clean_trial,
+                    # Angle-based
+                    trial.angle_based_mlr,
+                    trial.target_angle_path_deg,
+                    trial.total_non_target_angle_path_deg,
+                    trial.is_clean_trial_angle
                 ])
 
             # Write blank row then summary
@@ -280,13 +330,19 @@ class TrialSummaryExporter:
             writer.writerow(['total_trials', summary.total_trials])
             writer.writerow(['correct_trials', summary.correct_trials])
             writer.writerow(['wrong_finger_trials', summary.wrong_finger_trials])
-            writer.writerow(['clean_trials', summary.clean_trials])
             writer.writerow(['coupled_keypress_trials', summary.coupled_keypress_trials])
             writer.writerow(['wrong_finger_error_rate_%', summary.wrong_finger_error_rate])
-            writer.writerow(['clean_trial_rate_%', summary.clean_trial_rate])
             writer.writerow(['coupled_keypress_rate_%', summary.coupled_keypress_rate])
             writer.writerow(['avg_reaction_time_ms', summary.avg_reaction_time_ms])
-            writer.writerow(['avg_motion_leakage_ratio', summary.avg_motion_leakage_ratio])
+            writer.writerow(['--- Position-based ---'])
+            writer.writerow(['clean_trials_pos', summary.clean_trials])
+            writer.writerow(['clean_trial_rate_pos_%', summary.clean_trial_rate])
+            writer.writerow(['avg_pos_mlr', summary.avg_motion_leakage_ratio])
+            writer.writerow(['--- Angle-based ---'])
+            writer.writerow(['clean_trials_angle', summary.clean_trials_angle])
+            writer.writerow(['clean_trial_rate_angle_%', summary.clean_trial_rate_angle])
+            writer.writerow(['avg_angle_mlr', summary.avg_angle_based_mlr])
+            writer.writerow(['---'])
             writer.writerow(['final_score', summary.final_score])
 
     def _export_json(self, filepath: str, summary: SessionSummary):

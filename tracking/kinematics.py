@@ -18,14 +18,20 @@ class TrialMetrics:
     pressed_finger: str
     is_wrong_finger: bool
 
-    # Motion metrics
-    target_path_length: float  # Path length of target finger
-    non_target_path_lengths: Dict[str, float]  # Path lengths of other fingers
+    # Position-based motion metrics (raw 3D fingertip movement)
+    target_path_length: float  # Path length of target finger (mm)
+    non_target_path_lengths: Dict[str, float]  # Path lengths of other fingers (mm)
     motion_leakage_ratio: float  # MLR = sum(non-target) / target
+
+    # Angle-based motion metrics (finger flexion changes, immune to hand repositioning)
+    target_angle_path: float  # Sum of angle changes for target finger (degrees)
+    non_target_angle_paths: Dict[str, float]  # Angle path for other fingers (degrees)
+    angle_based_mlr: float  # Angle MLR = sum(non-target angles) / target angle
 
     # Clean trial criteria
     coupled_keypress: bool  # Did another finger cross 30-degree threshold?
-    is_clean_trial: bool  # Correct finger, no coupling, MLR <= 0.10
+    is_clean_trial: bool  # Correct finger, no coupling, position MLR <= 0.10
+    is_clean_trial_angle: bool  # Correct finger, no coupling, angle MLR <= 0.10
 
 
 class KinematicsProcessor:
@@ -94,12 +100,34 @@ class KinematicsProcessor:
         # Check for coupled keypress (any other finger crossed threshold)
         coupled_keypress = self._check_coupled_keypress(frames, pressed_finger)
 
+        # Calculate angle-based path lengths (immune to hand repositioning)
+        angle_paths = self._calculate_all_angle_paths(frames)
+
+        # Get target and non-target angle paths
+        target_angle_path = angle_paths.get(target_finger, 0.0)
+        non_target_angle_paths = {
+            name: path for name, path in angle_paths.items()
+            if name != target_finger
+        }
+
+        # Calculate angle-based MLR
+        if target_angle_path > 0.1:  # Avoid division by zero (0.1 degree threshold)
+            total_non_target_angle = sum(non_target_angle_paths.values())
+            angle_based_mlr = total_non_target_angle / target_angle_path
+        else:
+            angle_based_mlr = float('inf') if sum(non_target_angle_paths.values()) > 0.1 else 0.0
+
         # Determine if this is a clean trial
         is_wrong_finger = (target_finger != pressed_finger)
         is_clean_trial = (
             not is_wrong_finger and
             not coupled_keypress and
             motion_leakage_ratio <= self.MLR_THRESHOLD
+        )
+        is_clean_trial_angle = (
+            not is_wrong_finger and
+            not coupled_keypress and
+            angle_based_mlr <= self.MLR_THRESHOLD
         )
 
         return TrialMetrics(
@@ -110,8 +138,12 @@ class KinematicsProcessor:
             target_path_length=target_path_length,
             non_target_path_lengths=non_target_path_lengths,
             motion_leakage_ratio=motion_leakage_ratio,
+            target_angle_path=target_angle_path,
+            non_target_angle_paths=non_target_angle_paths,
+            angle_based_mlr=angle_based_mlr,
             coupled_keypress=coupled_keypress,
-            is_clean_trial=is_clean_trial
+            is_clean_trial=is_clean_trial,
+            is_clean_trial_angle=is_clean_trial_angle
         )
 
     def _calculate_all_path_lengths(self, frames: List) -> Dict[str, float]:
@@ -162,6 +194,42 @@ class KinematicsProcessor:
             (pos2[1] - pos1[1]) ** 2 +
             (pos2[2] - pos1[2]) ** 2
         )
+
+    def _calculate_all_angle_paths(self, frames: List) -> Dict[str, float]:
+        """
+        Calculate angle path length for each finger across all frames.
+
+        Angle path = sum of absolute angle changes between consecutive frames.
+        This is immune to hand repositioning since it measures finger flexion changes only.
+
+        Args:
+            frames: List of FrameSnapshot objects
+
+        Returns:
+            Dictionary mapping finger names to their angle path lengths (degrees)
+        """
+        angle_paths = {name: 0.0 for name in FINGER_NAMES}
+
+        if len(frames) < 2:
+            return angle_paths
+
+        # Sort frames by timestamp
+        sorted_frames = sorted(frames, key=lambda f: f.timestamp_ms)
+
+        for i in range(1, len(sorted_frames)):
+            prev_frame = sorted_frames[i - 1]
+            curr_frame = sorted_frames[i]
+
+            for finger_name in FINGER_NAMES:
+                prev_finger = prev_frame.get_finger(finger_name)
+                curr_finger = curr_frame.get_finger(finger_name)
+
+                if prev_finger and curr_finger:
+                    # Calculate absolute angle change
+                    angle_change = abs(curr_finger.angle - prev_finger.angle)
+                    angle_paths[finger_name] += angle_change
+
+        return angle_paths
 
     def _check_coupled_keypress(self, frames: List, pressed_finger: str) -> bool:
         """
