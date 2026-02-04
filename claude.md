@@ -153,8 +153,8 @@ Left Hand:              Right Hand:
 
 ## Future Enhancements
 - [ ] Multiple game modes (timed, endless, challenge)
-- [ ] Sound effects and music
-- [ ] High score persistence
+- [x] Sound effects and music (implemented)
+- [x] High score persistence (implemented)
 - [ ] Multiplayer support
 - [x] Analytics and progress tracking (session logging implemented)
 
@@ -344,3 +344,44 @@ Left Hand:              Right Hand:
    - Motion amplitude: Path length (sum of Euclidean distances)
    - Leakage tolerance τ: 0.10 (10% of target motion)
    - Clean trial: correct finger + no coupling + MLR ≤ 0.10
+
+### 2026-02-04
+
+#### High Score Persistence
+**User Request**: Add high score persistence across sessions
+
+**Implementation**:
+
+1. **game/high_scores.py** (New File):
+   - `HighScoreEntry` dataclass with score, date, game mode, accuracy, clean trial rate, avg RT
+   - `HighScoreManager` class for persisting top 10 scores per game mode
+   - Saves to `high_scores.json`
+   - Methods: `add_score()`, `get_high_scores()`, `get_top_score()`, `is_high_score()`
+
+2. **main.py**:
+   - Initialize HighScoreManager and load persisted high score
+   - `_save_high_score()` method called when game ends (GAME_OVER state)
+   - Saves score with accuracy, clean trial rate, and avg reaction time
+
+3. **Data stored per entry**:
+   - `score`, `date`, `game_mode`
+   - `duration_seconds`, `accuracy`
+   - `clean_trial_rate`, `avg_reaction_time_ms`
+
+#### Game Mode Ideas (Planned)
+Potential game modes for finger individuation rehabilitation:
+
+**Rehabilitation-focused:**
+- **Assessment Mode** - Structured test: each finger targeted X times randomly, generates clinical report
+- **Progressive Training** - Start with thumbs only, unlock more fingers as mastery improves
+- **Isolation Drill** - Focus on one finger at a time until MLR drops below threshold
+
+**Challenge modes:**
+- **Speed Blitz** - 60-second timed mode, hit as many correct fingers as possible
+- **Endurance** - No lives, difficulty ramps continuously
+- **Sequence Memory** - Simon Says: watch a finger sequence, repeat it back
+
+**Engagement modes:**
+- **Rhythm Mode** - Notes descend like Guitar Hero, press in rhythm
+- **Mirror Mode** - Target on left, press with right hand (cross-body coordination)
+- **Chord Mode** - Multiple missiles at once, press multiple fingers simultaneously

@@ -20,6 +20,7 @@ from game.constants import (
     FINGER_NAMES
 )
 from game.game_engine import GameEngine, GameState
+from game.high_scores import HighScoreManager
 from tracking.leap_controller import LeapController, SimulatedLeapController
 from tracking.hand_tracker import HandTracker
 from tracking.calibration import CalibrationManager
@@ -54,6 +55,12 @@ class FingerInvaders:
 
         # Initialize game engine
         self.game_engine = GameEngine(self.hand_tracker, self.calibration)
+
+        # Initialize high score manager and load persisted high score
+        self.high_score_manager = HighScoreManager()
+        top_score = self.high_score_manager.get_top_score("classic")
+        if top_score:
+            self.game_engine.high_score = top_score
 
         # Initialize session logger
         self.session_logger = SessionLogger()
@@ -212,6 +219,43 @@ class FingerInvaders:
             # Quit
             self.running = False
 
+    def _save_high_score(self):
+        """Save the current game score to high scores."""
+        game_state = self.game_engine.get_game_state()
+        stats = game_state['stats']
+
+        # Calculate accuracy
+        total_attempts = stats['missiles_hit'] + stats['wrong_fingers']
+        accuracy = (stats['missiles_hit'] / total_attempts * 100) if total_attempts > 0 else 0
+
+        # Get clean trial rate and avg reaction time from trial summary if available
+        clean_trial_rate = 0
+        avg_reaction_time = 0
+        if self.trial_summary.trials:
+            clean_count = sum(1 for t in self.trial_summary.trials if t.is_clean_trial)
+            clean_trial_rate = (clean_count / len(self.trial_summary.trials)) * 100
+            valid_rts = [t.reaction_time_ms for t in self.trial_summary.trials if t.reaction_time_ms > 0]
+            avg_reaction_time = sum(valid_rts) / len(valid_rts) if valid_rts else 0
+
+        # Add to high scores
+        rank = self.high_score_manager.add_score(
+            score=game_state['score'],
+            game_mode="classic",
+            duration_seconds=0,  # Could track this if needed
+            accuracy=accuracy,
+            clean_trial_rate=clean_trial_rate,
+            avg_reaction_time_ms=avg_reaction_time
+        )
+
+        # Update game engine high score if this is a new record
+        if rank == 1:
+            self.game_engine.high_score = game_state['score']
+        elif rank:
+            # Update to the actual top score
+            top = self.high_score_manager.get_top_score("classic")
+            if top:
+                self.game_engine.high_score = top
+
     def _update(self, dt: float):
         """Update game state."""
         state = self.game_engine.state
@@ -287,6 +331,10 @@ class FingerInvaders:
             if events['life_lost']:
                 self.game_ui.trigger_lives_flash()
                 self.sound_manager.play_life_lost()
+
+                # Check if game just ended - save high score
+                if self.game_engine.state == GameState.GAME_OVER:
+                    self._save_high_score()
 
             for pos in events['missile_destroyed']:
                 self.game_ui.add_explosion(pos[0], pos[1])

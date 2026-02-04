@@ -75,5 +75,8 @@ venv.bak/
 # Calibration data (user-specific)
 calibration_data.json
 
+# Session data (generated)
+session_logs/
+
 # Logs
 *.log
