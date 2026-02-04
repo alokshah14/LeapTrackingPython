@@ -25,6 +25,7 @@ from tracking.hand_tracker import HandTracker
 from tracking.calibration import CalibrationManager
 from tracking.session_logger import SessionLogger
 from tracking.kinematics import KinematicsProcessor
+from tracking.trial_summary import TrialSummaryExporter
 from ui.game_ui import GameUI, MenuUI
 from ui.hand_renderer import HandRenderer, CalibrationHandRenderer
 from ui.colors import BACKGROUND
@@ -56,6 +57,9 @@ class FingerInvaders:
 
         # Initialize session logger
         self.session_logger = SessionLogger()
+
+        # Initialize trial summary exporter for clean biomechanics output
+        self.trial_summary = TrialSummaryExporter()
 
         # Initialize kinematics processor for biomechanical analysis
         self.kinematics = KinematicsProcessor(self.hand_tracker)
@@ -139,6 +143,7 @@ class FingerInvaders:
                 # End session when leaving game
                 game_state = self.game_engine.get_game_state()
                 self.session_logger.end_session(game_state['score'], game_state['lives'])
+                self.trial_summary.end_session(game_state['score'])
                 self.game_engine.state = GameState.MENU
             elif state == GameState.GAME_OVER:
                 self.game_engine.state = GameState.MENU
@@ -155,8 +160,10 @@ class FingerInvaders:
                 # End previous session and start new one
                 game_state = self.game_engine.get_game_state()
                 self.session_logger.end_session(game_state['score'], game_state['lives'])
+                self.trial_summary.end_session(game_state['score'])
                 self.game_engine.start_game()
                 self.session_logger.start_session(self.calibration.calibration_data)
+                self.trial_summary.start_session()
             elif state == GameState.CALIBRATION_MENU:
                 self.calibration.start_calibration()
                 self.game_engine.state = GameState.CALIBRATING
@@ -197,6 +204,7 @@ class FingerInvaders:
             self.game_engine.start_game()
             # Start session logging with calibration data
             self.session_logger.start_session(self.calibration.calibration_data)
+            self.trial_summary.start_session()
         elif option == 1:
             # Calibrate
             self.game_engine.state = GameState.CALIBRATION_MENU
@@ -230,6 +238,13 @@ class FingerInvaders:
                     # Show clean trial indicator if applicable
                     if trial_metrics.is_clean_trial:
                         self.hand_renderer.show_clean_trial(trial_metrics.motion_leakage_ratio)
+
+                    # Record trial for clean summary export
+                    self.trial_summary.record_trial(
+                        target_finger=press_event['target'],
+                        pressed_finger=press_event['finger'],
+                        trial_metrics=trial_metrics
+                    )
 
                 self.session_logger.log_finger_press(
                     finger_pressed=press_event['finger'],
@@ -435,6 +450,7 @@ class FingerInvaders:
         if self.session_logger.session_data:
             game_state = self.game_engine.get_game_state()
             self.session_logger.end_session(game_state['score'], game_state['lives'])
+            self.trial_summary.end_session(game_state['score'])
 
         self.leap_controller.cleanup()
         pygame.quit()

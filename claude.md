@@ -61,8 +61,12 @@ LeapTrackingPython/
 │   ├── leap_controller.py  # Leap Motion interface using official bindings
 │   ├── hand_tracker.py     # Hand and finger tracking
 │   ├── calibration.py      # Calibration system with user confirmation
-│   └── session_logger.py   # Session data logging for analysis
+│   ├── session_logger.py   # Session data logging for analysis
+│   ├── kinematics.py       # Biomechanical metrics processor
+│   └── trial_summary.py    # Clean CSV/JSON trial summary exporter
 ├── session_logs/           # Session data files (generated)
+│   ├── session_*.json      # Full session logs with all hand tracking data
+│   └── trials_*.csv/json   # Clean trial summaries with biomechanics
 ├── ui/
 │   ├── __init__.py
 │   ├── hand_renderer.py    # Hand visualization
@@ -306,3 +310,37 @@ Left Hand:              Right Hand:
    - Calculates trial metrics for every finger press
    - Passes metrics to session logger
    - Triggers clean trial display when applicable
+
+#### Trial Summary Export (Clean CSV/JSON Output)
+**User Request**: Create clear trial summary files with all biomechanics metrics
+
+**Implementation**:
+
+1. **tracking/trial_summary.py** (New File):
+   - `TrialRecord` dataclass with per-trial metrics
+   - `SessionSummary` dataclass with session-level rates
+   - `TrialSummaryExporter` class that generates both CSV and JSON
+
+2. **Output Files** (in `session_logs/`):
+   - `trials_YYYYMMDD_HHMMSS.csv` - One row per trial, easy for Excel/R/Python
+   - `trials_YYYYMMDD_HHMMSS.json` - Structured data with summary + trials array
+
+3. **Per-Trial Columns**:
+   - `trial_number`, `timestamp`, `elapsed_seconds`
+   - `target_finger`, `pressed_finger`, `is_wrong_finger`
+   - `reaction_time_ms`, `motion_leakage_ratio`
+   - `coupled_keypress`, `is_clean_trial`
+   - `target_path_length_mm`, `total_non_target_path_length_mm`
+
+4. **Session Summary Rates**:
+   - `wrong_finger_error_rate` (%)
+   - `clean_trial_rate` (%)
+   - `coupled_keypress_rate` (%)
+   - `avg_reaction_time_ms`
+   - `avg_motion_leakage_ratio`
+
+5. **Research Standards Used**:
+   - Time window: [-200ms, +400ms] around keydown
+   - Motion amplitude: Path length (sum of Euclidean distances)
+   - Leakage tolerance τ: 0.10 (10% of target motion)
+   - Clean trial: correct finger + no coupling + MLR ≤ 0.10
