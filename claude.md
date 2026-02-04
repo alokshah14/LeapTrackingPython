@@ -385,3 +385,32 @@ Potential game modes for finger individuation rehabilitation:
 - **Rhythm Mode** - Notes descend like Guitar Hero, press in rhythm
 - **Mirror Mode** - Target on left, press with right hand (cross-body coordination)
 - **Chord Mode** - Multiple missiles at once, press multiple fingers simultaneously
+
+#### High Scores Menu & Celebration Screen
+**User Request**: Add ability to view high scores from menu and celebratory screen for new high scores
+
+**Implementation**:
+
+1. **game/game_engine.py**:
+   - Added `HIGH_SCORES` and `NEW_HIGH_SCORE` game states
+
+2. **ui/game_ui.py**:
+   - Added "High Scores" as 3rd menu option (Start, Calibrate, High Scores, Quit)
+   - `draw_high_scores()` - Leaderboard display with columns: Rank, Score, Accuracy, Clean %, Avg RT, Date
+   - Gold/Silver/Bronze colors for top 3 ranks
+   - `draw_new_high_score()` - Animated celebration screen with:
+     - Pulsing "NEW HIGH SCORE!" text
+     - Score with glowing effect
+     - Rank-based medal text (1st/2nd/3rd place or "#N on leaderboard")
+     - Particle/sparkle effects
+     - Fireworks on sides
+
+3. **game/sound_manager.py**:
+   - Added `_create_celebration_sound()` - Triumphant ascending arpeggio (C-E-G-C)
+   - `play_celebration()` method
+
+4. **main.py**:
+   - Handle `HIGH_SCORES` state (ESC returns to menu)
+   - Handle `NEW_HIGH_SCORE` state (SPACE continues to game over, ESC skips)
+   - Celebration animation timer
+   - Play celebration sound when high score achieved

@@ -311,6 +311,7 @@ class MenuUI:
         options = [
             ("Start Game", "Begin playing with current calibration" if has_calibration else "Calibration required first"),
             ("Calibrate", "Set up finger detection thresholds"),
+            ("High Scores", "View the leaderboard"),
             ("Quit", "Exit the game"),
         ]
 
@@ -412,3 +413,180 @@ class MenuUI:
     def get_selected_option(self) -> int:
         """Get currently selected option index."""
         return self.selected_option
+
+    def draw_high_scores(self, high_scores: List):
+        """
+        Draw the high scores leaderboard screen.
+
+        Args:
+            high_scores: List of HighScoreEntry objects
+        """
+        self.surface.fill(BACKGROUND)
+
+        # Title
+        title = self.fonts['title'].render("HIGH SCORES", True, YELLOW)
+        title_rect = title.get_rect(center=(WINDOW_WIDTH // 2, 80))
+        self.surface.blit(title, title_rect)
+
+        if not high_scores:
+            # No scores yet
+            no_scores = self.fonts['large'].render("No high scores yet!", True, GRAY)
+            no_rect = no_scores.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2))
+            self.surface.blit(no_scores, no_rect)
+
+            hint = self.fonts['medium'].render("Play a game to set your first record!", True, (150, 150, 200))
+            hint_rect = hint.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 50))
+            self.surface.blit(hint, hint_rect)
+        else:
+            # Column headers
+            header_y = 140
+            headers = ["RANK", "SCORE", "ACCURACY", "CLEAN %", "AVG RT", "DATE"]
+            x_positions = [80, 180, 320, 450, 570, 700]
+
+            for header, x in zip(headers, x_positions):
+                text = self.fonts['small'].render(header, True, (150, 150, 200))
+                self.surface.blit(text, (x, header_y))
+
+            # Draw separator line
+            pygame.draw.line(self.surface, (100, 100, 150), (60, header_y + 30), (WINDOW_WIDTH - 60, header_y + 30), 2)
+
+            # Draw scores
+            start_y = 180
+            for i, entry in enumerate(high_scores[:10]):
+                y = start_y + i * 45
+
+                # Alternating row background
+                if i % 2 == 0:
+                    pygame.draw.rect(self.surface, (30, 30, 50), (60, y - 5, WINDOW_WIDTH - 120, 40))
+
+                # Rank with medal colors for top 3
+                if i == 0:
+                    rank_color = (255, 215, 0)  # Gold
+                elif i == 1:
+                    rank_color = (192, 192, 192)  # Silver
+                elif i == 2:
+                    rank_color = (205, 127, 50)  # Bronze
+                else:
+                    rank_color = WHITE
+
+                rank_text = self.fonts['medium'].render(f"#{i + 1}", True, rank_color)
+                self.surface.blit(rank_text, (x_positions[0], y))
+
+                # Score
+                score_text = self.fonts['medium'].render(str(entry.score), True, WHITE)
+                self.surface.blit(score_text, (x_positions[1], y))
+
+                # Accuracy
+                acc_text = self.fonts['small'].render(f"{entry.accuracy:.1f}%", True, GREEN if entry.accuracy >= 80 else GRAY)
+                self.surface.blit(acc_text, (x_positions[2], y + 5))
+
+                # Clean trial rate
+                clean_text = self.fonts['small'].render(f"{entry.clean_trial_rate:.1f}%", True, GREEN if entry.clean_trial_rate >= 50 else GRAY)
+                self.surface.blit(clean_text, (x_positions[3], y + 5))
+
+                # Avg RT
+                rt_text = self.fonts['small'].render(f"{entry.avg_reaction_time_ms:.0f}ms", True, GRAY)
+                self.surface.blit(rt_text, (x_positions[4], y + 5))
+
+                # Date
+                date_text = self.fonts['small'].render(entry.date, True, (100, 100, 150))
+                self.surface.blit(date_text, (x_positions[5], y + 5))
+
+        # Instructions
+        inst = self.fonts['small'].render("Press ESC to return to menu", True, (100, 100, 150))
+        inst_rect = inst.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT - 40))
+        self.surface.blit(inst, inst_rect)
+
+    def draw_new_high_score(self, score: int, rank: int, animation_phase: float):
+        """
+        Draw the celebration screen for a new high score.
+
+        Args:
+            score: The score achieved
+            rank: The rank achieved (1-10)
+            animation_phase: Animation timer for effects
+        """
+        # Background with celebration overlay
+        self.surface.fill((10, 10, 30))
+
+        # Particle effects / stars
+        for i in range(50):
+            x = (i * 137 + int(animation_phase * 100)) % WINDOW_WIDTH
+            y = (i * 89 + int(animation_phase * 50)) % WINDOW_HEIGHT
+            size = (i % 4) + 1
+            brightness = int(150 + 100 * math.sin(animation_phase * 5 + i))
+            color = (brightness, brightness, min(255, brightness + 50))
+            pygame.draw.circle(self.surface, color, (x, y), size)
+
+        # Trophy/medal based on rank
+        if rank == 1:
+            medal_color = (255, 215, 0)  # Gold
+            medal_text = "1ST PLACE!"
+            subtitle = "NEW RECORD!"
+        elif rank == 2:
+            medal_color = (192, 192, 192)  # Silver
+            medal_text = "2ND PLACE!"
+            subtitle = "EXCELLENT!"
+        elif rank == 3:
+            medal_color = (205, 127, 50)  # Bronze
+            medal_text = "3RD PLACE!"
+            subtitle = "GREAT JOB!"
+        else:
+            medal_color = (100, 200, 255)  # Blue
+            medal_text = f"#{rank} ON LEADERBOARD!"
+            subtitle = "WELL DONE!"
+
+        # Pulsing effect
+        pulse = 1.0 + 0.1 * math.sin(animation_phase * 8)
+
+        # Main celebration text
+        congrats = self.fonts['title'].render("NEW HIGH SCORE!", True, YELLOW)
+        congrats_rect = congrats.get_rect(center=(WINDOW_WIDTH // 2, 120))
+        # Scale effect
+        scaled_congrats = pygame.transform.scale(
+            congrats,
+            (int(congrats.get_width() * pulse), int(congrats.get_height() * pulse))
+        )
+        scaled_rect = scaled_congrats.get_rect(center=(WINDOW_WIDTH // 2, 120))
+        self.surface.blit(scaled_congrats, scaled_rect)
+
+        # Score display with glow effect
+        score_text = self.fonts['title'].render(str(score), True, WHITE)
+        score_rect = score_text.get_rect(center=(WINDOW_WIDTH // 2, 220))
+
+        # Glow
+        glow_size = int(10 + 5 * math.sin(animation_phase * 6))
+        for offset in range(glow_size, 0, -2):
+            alpha = 50 - offset * 5
+            glow_surf = pygame.Surface((score_text.get_width() + offset * 2, score_text.get_height() + offset * 2), pygame.SRCALPHA)
+            glow_color = (*medal_color, max(0, alpha))
+            pygame.draw.rect(glow_surf, glow_color, glow_surf.get_rect(), border_radius=10)
+            glow_rect = glow_surf.get_rect(center=score_rect.center)
+            self.surface.blit(glow_surf, glow_rect)
+
+        self.surface.blit(score_text, score_rect)
+
+        # Medal/rank text
+        medal = self.fonts['large'].render(medal_text, True, medal_color)
+        medal_rect = medal.get_rect(center=(WINDOW_WIDTH // 2, 310))
+        self.surface.blit(medal, medal_rect)
+
+        # Subtitle
+        sub = self.fonts['medium'].render(subtitle, True, (200, 200, 255))
+        sub_rect = sub.get_rect(center=(WINDOW_WIDTH // 2, 370))
+        self.surface.blit(sub, sub_rect)
+
+        # Fireworks / sparkle effects on sides
+        for side in [-1, 1]:
+            x = WINDOW_WIDTH // 2 + side * 250
+            for j in range(5):
+                angle = animation_phase * 3 + j * 1.2
+                spark_x = x + int(30 * math.cos(angle))
+                spark_y = 250 + int(30 * math.sin(angle))
+                spark_color = (255, 200 + int(55 * math.sin(animation_phase * 10 + j)), 100)
+                pygame.draw.circle(self.surface, spark_color, (spark_x, spark_y), 4)
+
+        # Instructions
+        inst = self.fonts['medium'].render("Press SPACE to continue", True, (150, 150, 200))
+        inst_rect = inst.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT - 80))
+        self.surface.blit(inst, inst_rect)

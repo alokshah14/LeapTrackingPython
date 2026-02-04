@@ -23,6 +23,8 @@ class GameState:
     PLAYING = 'playing'
     PAUSED = 'paused'
     GAME_OVER = 'game_over'
+    HIGH_SCORES = 'high_scores'
+    NEW_HIGH_SCORE = 'new_high_score'
 
 
 class GameEngine:

@@ -94,6 +94,11 @@ class FingerInvaders:
             pygame.K_p: 'right_pinky',
         }
 
+        # High score celebration state
+        self.new_high_score_rank = None
+        self.new_high_score_value = 0
+        self.celebration_animation = 0
+
         # Running state
         self.running = True
 
@@ -159,6 +164,11 @@ class FingerInvaders:
                 self.game_engine.state = GameState.MENU
             elif state == GameState.CALIBRATION_MENU:
                 self.game_engine.state = GameState.MENU
+            elif state == GameState.HIGH_SCORES:
+                self.game_engine.state = GameState.MENU
+            elif state == GameState.NEW_HIGH_SCORE:
+                # Skip celebration, go to game over
+                self.game_engine.state = GameState.GAME_OVER
 
         elif event.key == pygame.K_SPACE:
             if state == GameState.PAUSED:
@@ -177,13 +187,16 @@ class FingerInvaders:
             elif state == GameState.CALIBRATING:
                 # Confirm phase transition in calibration
                 self.calibration.confirm_phase_transition()
+            elif state == GameState.NEW_HIGH_SCORE:
+                # Continue to game over screen
+                self.game_engine.state = GameState.GAME_OVER
 
         # Menu navigation
         elif state == GameState.MENU:
             if event.key == pygame.K_UP:
-                self.menu_ui.move_selection(-1, 3, self.calibration.has_calibration())
+                self.menu_ui.move_selection(-1, 4, self.calibration.has_calibration())
             elif event.key == pygame.K_DOWN:
-                self.menu_ui.move_selection(1, 3, self.calibration.has_calibration())
+                self.menu_ui.move_selection(1, 4, self.calibration.has_calibration())
             elif event.key == pygame.K_RETURN:
                 self._handle_menu_selection()
 
@@ -216,6 +229,9 @@ class FingerInvaders:
             # Calibrate
             self.game_engine.state = GameState.CALIBRATION_MENU
         elif option == 2:
+            # High Scores
+            self.game_engine.state = GameState.HIGH_SCORES
+        elif option == 3:
             # Quit
             self.running = False
 
@@ -255,6 +271,14 @@ class FingerInvaders:
             top = self.high_score_manager.get_top_score("classic")
             if top:
                 self.game_engine.high_score = top
+
+        # Trigger celebration screen if it's a high score
+        if rank:
+            self.new_high_score_rank = rank
+            self.new_high_score_value = game_state['score']
+            self.celebration_animation = 0
+            self.game_engine.state = GameState.NEW_HIGH_SCORE
+            self.sound_manager.play_celebration()
 
     def _update(self, dt: float):
         """Update game state."""
@@ -360,6 +384,10 @@ class FingerInvaders:
                 if self.game_engine.pause_reason == "HANDS NOT DETECTED":
                     self.game_engine.resume_game()
 
+        elif state == GameState.NEW_HIGH_SCORE:
+            # Update celebration animation
+            self.celebration_animation += dt * 0.1
+
         # Update UI animations
         self.game_ui.update(dt)
         self.menu_ui.update(dt)
@@ -426,6 +454,17 @@ class FingerInvaders:
             self._render_game()
             game_state = self.game_engine.get_game_state()
             self.game_ui.draw_game_over(game_state['score'], game_state['high_score'])
+
+        elif state == GameState.HIGH_SCORES:
+            high_scores = self.high_score_manager.get_high_scores("classic")
+            self.menu_ui.draw_high_scores(high_scores)
+
+        elif state == GameState.NEW_HIGH_SCORE:
+            self.menu_ui.draw_new_high_score(
+                self.new_high_score_value,
+                self.new_high_score_rank,
+                self.celebration_animation
+            )
 
     def _render_game(self):
         """Render the main game."""

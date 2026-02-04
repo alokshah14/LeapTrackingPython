@@ -47,6 +47,9 @@ class SoundManager:
             # Generate life lost sound
             self.sounds['life_lost'] = self._create_life_lost_sound()
 
+            # Generate celebration sound (for new high score)
+            self.sounds['celebration'] = self._create_celebration_sound()
+
             print("Sound effects generated successfully.")
 
         except Exception as e:
@@ -178,6 +181,43 @@ class SoundManager:
         sound.set_volume(0.6)
         return sound
 
+    def _create_celebration_sound(self):
+        """Create a celebration/fanfare sound effect for high scores."""
+        sample_rate = 44100
+        duration = 0.8  # 800ms
+        num_samples = int(sample_rate * duration)
+
+        samples = []
+        # Create a triumphant ascending arpeggio
+        notes = [
+            (0.0, 0.15, 523),   # C5
+            (0.1, 0.15, 659),   # E5
+            (0.2, 0.15, 784),   # G5
+            (0.3, 0.5, 1047),   # C6 (hold)
+        ]
+
+        for i in range(num_samples):
+            t = i / sample_rate
+            sample = 0
+
+            for start, dur, freq in notes:
+                if start <= t < start + dur:
+                    note_t = t - start
+                    # Envelope for each note
+                    envelope = math.exp(-note_t * 5) * (1 - math.exp(-note_t * 50))
+                    # Add harmonics for richer sound
+                    sample += envelope * (
+                        0.6 * math.sin(2 * math.pi * freq * t) +
+                        0.3 * math.sin(2 * math.pi * freq * 2 * t) +
+                        0.1 * math.sin(2 * math.pi * freq * 3 * t)
+                    )
+
+            samples.append(sample)
+
+        sound = self._create_sound_from_samples(samples, sample_rate)
+        sound.set_volume(0.7)
+        return sound
+
     def play(self, sound_name: str):
         """Play a sound effect by name."""
         if not self.enabled:
@@ -206,6 +246,10 @@ class SoundManager:
     def play_life_lost(self):
         """Play the life lost sound."""
         self.play('life_lost')
+
+    def play_celebration(self):
+        """Play the celebration sound."""
+        self.play('celebration')
 
     def set_volume(self, volume: float):
         """Set master volume (0.0 to 1.0)."""
