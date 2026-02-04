@@ -48,6 +48,10 @@ class CalibrationManager:
         self.left_baseline_captured = False
         self.right_baseline_captured = False
 
+        # Palm position tracking (for hand position overlay)
+        self.palm_position_samples = {'left': [], 'right': []}
+        self.calibrated_palm_positions = {'left': None, 'right': None}
+
         # Current finger angle tracking
         self.current_finger_angle = 0.0
         self.current_finger_angle_from_baseline = 0.0
@@ -77,6 +81,7 @@ class CalibrationManager:
             self.thresholds = data.get('thresholds', self.thresholds)
             self.angle_thresholds = data.get('angle_thresholds', self.angle_thresholds)
             self.baseline_angles = data.get('baseline_angles', self.baseline_angles)
+            self.calibrated_palm_positions = data.get('palm_positions', {'left': None, 'right': None})
             self.is_calibrated = True
             print("Loaded existing calibration data.")
             return True
@@ -92,6 +97,7 @@ class CalibrationManager:
             'angle_thresholds': self.angle_thresholds,
             'baseline_angles': self.baseline_angles,
             'calibration_data': self.calibration_data,
+            'palm_positions': self.calibrated_palm_positions,
             'timestamp': time.time(),
         }
 
@@ -118,6 +124,61 @@ class CalibrationManager:
         """Get the baseline angle for a specific finger."""
         return self.baseline_angles.get(finger_name)
 
+    def get_calibrated_palm_positions(self) -> Dict:
+        """Get the calibrated palm positions for both hands."""
+        return self.calibrated_palm_positions
+
+    def check_hand_positions(self, current_hand_data: Dict, tolerance: float = 50.0) -> Dict:
+        """
+        Check if current hand positions match calibration positions.
+
+        Args:
+            current_hand_data: Current hand tracking data
+            tolerance: Distance tolerance in mm (default 50mm)
+
+        Returns:
+            Dictionary with 'left_in_position', 'right_in_position', 'both_in_position',
+            and distance info for each hand
+        """
+        result = {
+            'left_in_position': False,
+            'right_in_position': False,
+            'both_in_position': False,
+            'left_distance': None,
+            'right_distance': None,
+        }
+
+        for hand_type in ['left', 'right']:
+            calibrated_pos = self.calibrated_palm_positions.get(hand_type)
+            current_hand = current_hand_data.get(hand_type)
+
+            if calibrated_pos is None:
+                continue
+
+            if current_hand is None:
+                continue
+
+            current_pos = current_hand.get('palm_position')
+            if current_pos is None:
+                continue
+
+            # Calculate distance between current and calibrated position
+            distance = (
+                (current_pos[0] - calibrated_pos[0]) ** 2 +
+                (current_pos[1] - calibrated_pos[1]) ** 2 +
+                (current_pos[2] - calibrated_pos[2]) ** 2
+            ) ** 0.5
+
+            result[f'{hand_type}_distance'] = distance
+            result[f'{hand_type}_in_position'] = distance <= tolerance
+
+        # Check if both hands are in position (or if only one hand has calibration data)
+        left_ok = result['left_in_position'] or self.calibrated_palm_positions.get('left') is None
+        right_ok = result['right_in_position'] or self.calibrated_palm_positions.get('right') is None
+        result['both_in_position'] = left_ok and right_ok
+
+        return result
+
     def start_calibration(self):
         """Start the calibration process with countdown."""
         self.calibrating = True
@@ -125,6 +186,7 @@ class CalibrationManager:
         self.calibration_phase = 'countdown'
         self.countdown_start = time.time()
         self.baseline_samples = {name: [] for name in FINGER_NAMES}
+        self.palm_position_samples = {'left': [], 'right': []}
         self.left_baseline_captured = False
         self.right_baseline_captured = False
         self.calibration_data = {}
@@ -248,6 +310,15 @@ class CalibrationManager:
                     self.baseline_angles[finger_name] = 0.0
                     print(f"Warning: No samples for {finger_name}, using 0 as baseline")
 
+            # Calculate average palm position for this hand
+            palm_samples = self.palm_position_samples.get(hand_type, [])
+            if palm_samples:
+                avg_x = sum(p[0] for p in palm_samples) / len(palm_samples)
+                avg_y = sum(p[1] for p in palm_samples) / len(palm_samples)
+                avg_z = sum(p[2] for p in palm_samples) / len(palm_samples)
+                self.calibrated_palm_positions[hand_type] = (avg_x, avg_y, avg_z)
+                print(f"Palm position for {hand_type} hand: ({avg_x:.1f}, {avg_y:.1f}, {avg_z:.1f})")
+
             # Move to next phase
             if hand_type == 'left':
                 self.left_baseline_captured = True
@@ -274,6 +345,11 @@ class CalibrationManager:
             for finger_name in fingers:
                 angle = finger_angles.get(finger_name, 0.0)
                 self.baseline_samples[finger_name].append(angle)
+
+            # Also collect palm position samples
+            palm_pos = hand.get('palm_position')
+            if palm_pos:
+                self.palm_position_samples[hand_type].append(palm_pos)
 
         return True
 
