@@ -3,6 +3,7 @@
 import pygame
 import random
 import math
+import time
 from .constants import (
     MISSILE_WIDTH, MISSILE_HEIGHT, MISSILE_BASE_SPEED,
     GAME_AREA_TOP, GAME_AREA_BOTTOM, LANE_WIDTH, FINGER_NAMES
@@ -38,6 +39,7 @@ class Missile:
         self.active = True
         self.hit = False
         self.reached_bottom = False
+        self.spawn_time_ms = time.time() * 1000  # Timestamp for reaction time calculation
 
         # Visual properties
         self.color = FINGER_COLORS.get(self.finger_name, MISSILE_ENEMY)

@@ -24,6 +24,7 @@ from tracking.leap_controller import LeapController, SimulatedLeapController
 from tracking.hand_tracker import HandTracker
 from tracking.calibration import CalibrationManager
 from tracking.session_logger import SessionLogger
+from tracking.kinematics import KinematicsProcessor
 from ui.game_ui import GameUI, MenuUI
 from ui.hand_renderer import HandRenderer, CalibrationHandRenderer
 from ui.colors import BACKGROUND
@@ -55,6 +56,9 @@ class FingerInvaders:
 
         # Initialize session logger
         self.session_logger = SessionLogger()
+
+        # Initialize kinematics processor for biomechanical analysis
+        self.kinematics = KinematicsProcessor(self.hand_tracker)
 
         # Initialize sound manager
         self.sound_manager = SoundManager()
@@ -211,8 +215,22 @@ class FingerInvaders:
             hand_data = self.leap_controller.update()
             game_state = self.game_engine.get_game_state()
 
-            # Log finger press events and play sounds
+            # Log finger press events with biomechanical metrics and play sounds
             for press_event in events.get('finger_presses', []):
+                # Calculate biomechanical trial metrics
+                trial_metrics = None
+                if press_event['target']:  # Only calculate if there was a target
+                    trial_metrics = self.kinematics.calculate_trial_metrics(
+                        press_timestamp_ms=press_event['press_time_ms'],
+                        target_finger=press_event['target'],
+                        pressed_finger=press_event['finger'],
+                        missile_spawn_time_ms=press_event['missile_spawn_time_ms']
+                    )
+
+                    # Show clean trial indicator if applicable
+                    if trial_metrics.is_clean_trial:
+                        self.hand_renderer.show_clean_trial(trial_metrics.motion_leakage_ratio)
+
                 self.session_logger.log_finger_press(
                     finger_pressed=press_event['finger'],
                     target_finger=press_event['target'],
@@ -221,7 +239,8 @@ class FingerInvaders:
                     right_hand_data=hand_data.get('right'),
                     score=game_state['score'],
                     lives=game_state['lives'],
-                    difficulty=game_state['difficulty']
+                    difficulty=game_state['difficulty'],
+                    trial_metrics=trial_metrics
                 )
 
                 # Play fire sound for every finger press

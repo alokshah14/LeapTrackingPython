@@ -2,11 +2,41 @@
 
 import time
 import math
+from collections import deque
 from typing import Dict, List, Optional, Tuple
 from game.constants import (
     FINGER_NAMES, PRESS_DEBOUNCE_TIME, FINGER_PRESS_THRESHOLD,
     FINGER_PRESS_ANGLE_THRESHOLD
 )
+
+# Buffer configuration
+BUFFER_DURATION_MS = 1000  # 1 second rolling buffer
+FRAME_SAMPLE_RATE_MS = 16  # ~60fps sampling
+
+
+class FingerSnapshot:
+    """Snapshot of a single finger's state at a point in time."""
+
+    def __init__(self, name: str, tip_position: Tuple[float, float, float],
+                 angle: float, is_pressed: bool):
+        self.name = name
+        self.tip_position = tip_position  # (x, y, z)
+        self.angle = angle  # Flexion angle in degrees
+        self.is_pressed = is_pressed
+
+
+class FrameSnapshot:
+    """Snapshot of all finger states at a single timestamp."""
+
+    def __init__(self, timestamp_ms: float):
+        self.timestamp_ms = timestamp_ms
+        self.fingers: Dict[str, FingerSnapshot] = {}
+
+    def add_finger(self, finger: FingerSnapshot):
+        self.fingers[finger.name] = finger
+
+    def get_finger(self, name: str) -> Optional[FingerSnapshot]:
+        return self.fingers.get(name)
 
 
 class HandTracker:
@@ -36,6 +66,13 @@ class HandTracker:
         # Press detection
         self.last_press_time = {name: 0 for name in FINGER_NAMES}
         self.press_events = []  # Queue of recent press events
+
+        # Rolling buffer for kinematic analysis (1 second of frames)
+        self.frame_buffer: deque = deque(maxlen=int(BUFFER_DURATION_MS / FRAME_SAMPLE_RATE_MS))
+        self.last_buffer_sample_time = 0
+
+        # Press event timestamps for reaction time calculation
+        self.last_press_timestamp_ms = {name: 0 for name in FINGER_NAMES}
 
         # Tracking state
         self.hands_missing_since = None
@@ -105,11 +142,60 @@ class HandTracker:
                     if time_since_last >= PRESS_DEBOUNCE_TIME:
                         new_presses.append(full_name)
                         self.last_press_time[full_name] = current_time
+                        self.last_press_timestamp_ms[full_name] = current_time
 
                 self.finger_states[full_name] = is_pressed
 
         self.press_events = new_presses
+
+        # Add frame to rolling buffer for kinematic analysis
+        if current_time - self.last_buffer_sample_time >= FRAME_SAMPLE_RATE_MS:
+            self._add_frame_to_buffer(current_time)
+            self.last_buffer_sample_time = current_time
+
         return new_presses
+
+    def _add_frame_to_buffer(self, timestamp_ms: float):
+        """Add current finger states to the rolling buffer."""
+        frame = FrameSnapshot(timestamp_ms)
+
+        for finger_name in FINGER_NAMES:
+            tip_pos = self.finger_positions.get(finger_name, (0, 0, 0))
+            angle = self.finger_angles.get(finger_name, 0.0)
+            is_pressed = self.finger_states.get(finger_name, False)
+
+            finger_snap = FingerSnapshot(finger_name, tip_pos, angle, is_pressed)
+            frame.add_finger(finger_snap)
+
+        self.frame_buffer.append(frame)
+
+    def get_frames_in_window(self, center_time_ms: float,
+                              before_ms: float = 200,
+                              after_ms: float = 400) -> List[FrameSnapshot]:
+        """
+        Get all frames within a time window around a center point.
+
+        Args:
+            center_time_ms: Center timestamp in milliseconds
+            before_ms: Milliseconds before center to include
+            after_ms: Milliseconds after center to include
+
+        Returns:
+            List of FrameSnapshot objects within the window
+        """
+        window_start = center_time_ms - before_ms
+        window_end = center_time_ms + after_ms
+
+        frames = []
+        for frame in self.frame_buffer:
+            if window_start <= frame.timestamp_ms <= window_end:
+                frames.append(frame)
+
+        return frames
+
+    def get_press_timestamp(self, finger_name: str) -> float:
+        """Get the timestamp of the last press for a finger."""
+        return self.last_press_timestamp_ms.get(finger_name, 0)
 
     def _update_hand_visibility(self, hands_data: Dict):
         """Update hand visibility tracking."""

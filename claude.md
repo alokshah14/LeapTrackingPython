@@ -254,3 +254,55 @@ Left Hand:              Right Hand:
 
 4. **game_ui.py**:
    - Updated calibration menu instructions for new flow
+
+#### Biomechanical Metrics - "Minimal Core Outcome Set"
+**User Request**: Add research-grade rehabilitation metrics
+
+**Implementation**:
+
+1. **tracking/hand_tracker.py** - Data Buffering:
+   - Added `FingerSnapshot` and `FrameSnapshot` classes
+   - Maintains 1-second rolling buffer of finger states (tip positions + angles)
+   - `get_frames_in_window()` extracts frames between t-200ms and t+400ms
+   - Captures exact timestamps at press detection
+
+2. **tracking/kinematics.py** (New File) - Outcome Processor:
+   - `TrialMetrics` dataclass with all biomechanical markers
+   - `calculate_trial_metrics()` computes:
+     - **Reaction Time**: t_press - t_missile_spawn
+     - **Motion Amplitude (Path Length)**: Sum of Euclidean distances for each finger
+     - **Motion Leakage Ratio (MLR)**: sum(non-target path lengths) / target path length
+     - **Coupled Keypress**: Did another finger cross 30° threshold?
+     - **Is Clean Trial**: Correct finger + no coupling + MLR ≤ 0.10
+
+3. **tracking/session_logger.py** - Extended Logging:
+   - New fields in every trial event:
+     - `reaction_time_ms`
+     - `is_wrong_finger`
+     - `motion_leakage_ratio`
+     - `is_clean_trial`
+     - `coupled_keypress`
+     - `target_path_length_mm`
+     - `non_target_path_lengths`
+   - Session summary includes:
+     - `clean_trials` count
+     - `coupled_keypresses` count
+     - `average_mlr`
+     - `average_reaction_time_ms`
+
+4. **game/missile.py**:
+   - Added `spawn_time_ms` attribute for reaction time calculation
+
+5. **game/game_engine.py**:
+   - Press events now include `press_time_ms` and `missile_spawn_time_ms`
+
+6. **ui/hand_renderer.py** - Visual Feedback:
+   - `show_clean_trial()` method displays "CLEAN" or "PERFECT ISOLATION"
+   - Shows MLR percentage below the indicator
+   - Gold color for PERFECT (MLR ≤ 0.05), green for CLEAN (MLR ≤ 0.10)
+
+7. **main.py**:
+   - Integrated `KinematicsProcessor`
+   - Calculates trial metrics for every finger press
+   - Passes metrics to session logger
+   - Triggers clean trial display when applicable

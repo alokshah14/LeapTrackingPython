@@ -53,6 +53,11 @@ class HandRenderer:
         self.baseline_angles = {}
         self.show_angle_bars = True  # Toggle for angle bar display
 
+        # Clean trial feedback
+        self.clean_trial_display_time = 0  # Timestamp when to stop showing
+        self.clean_trial_text = ""  # "CLEAN", "PERFECT", etc.
+        self.clean_trial_mlr = 0.0  # MLR value to display
+
     def set_highlighted_fingers(self, fingers: List[str]):
         """
         Set which fingers should be highlighted.
@@ -86,6 +91,25 @@ class HandRenderer:
         """Toggle the angle bar display on/off."""
         self.show_angle_bars = not self.show_angle_bars
         return self.show_angle_bars
+
+    def show_clean_trial(self, mlr: float, duration_ms: float = 1500):
+        """
+        Show clean trial indicator.
+
+        Args:
+            mlr: Motion Leakage Ratio value
+            duration_ms: How long to show the indicator
+        """
+        import time
+        self.clean_trial_display_time = time.time() * 1000 + duration_ms
+        self.clean_trial_mlr = mlr
+
+        if mlr <= 0.05:
+            self.clean_trial_text = "PERFECT ISOLATION"
+        elif mlr <= 0.10:
+            self.clean_trial_text = "CLEAN"
+        else:
+            self.clean_trial_text = ""  # Don't show for non-clean trials
 
     def draw(self, hand_data: Dict, finger_states: Dict[str, bool]):
         """
@@ -124,6 +148,43 @@ class HandRenderer:
         # Draw angle bars if enabled and we have angle data
         if self.show_angle_bars and self.finger_angles:
             self._draw_angle_bars(finger_states)
+
+        # Draw clean trial indicator if active
+        self._draw_clean_trial_indicator()
+
+    def _draw_clean_trial_indicator(self):
+        """Draw the clean trial indicator if it's currently active."""
+        import time
+        current_time = time.time() * 1000
+
+        if self.clean_trial_text and current_time < self.clean_trial_display_time:
+            # Calculate fade based on remaining time
+            remaining = self.clean_trial_display_time - current_time
+            alpha = min(255, int(remaining / 1500 * 255 * 2))  # Fade out
+
+            # Draw the text
+            font = pygame.font.Font(None, 64)
+
+            # Choose color based on rating
+            if "PERFECT" in self.clean_trial_text:
+                color = (255, 215, 0)  # Gold
+            else:
+                color = (100, 255, 100)  # Green
+
+            # Render with pulse effect
+            pulse = abs(math.sin(self.pulse_phase * 3)) * 0.3 + 0.7
+            adjusted_color = tuple(int(c * pulse) for c in color)
+
+            text_surface = font.render(self.clean_trial_text, True, adjusted_color)
+            text_rect = text_surface.get_rect(center=(WINDOW_WIDTH // 2, 100))
+            self.surface.blit(text_surface, text_rect)
+
+            # Show MLR value below
+            mlr_font = pygame.font.Font(None, 28)
+            mlr_text = f"MLR: {self.clean_trial_mlr:.2%}"
+            mlr_surface = mlr_font.render(mlr_text, True, (200, 200, 200))
+            mlr_rect = mlr_surface.get_rect(center=(WINDOW_WIDTH // 2, 135))
+            self.surface.blit(mlr_surface, mlr_rect)
 
     def _draw_hand(self, hand_type: str, hand_data: Optional[Dict],
                    finger_states: Dict[str, bool], center: tuple, mirror: bool = False):

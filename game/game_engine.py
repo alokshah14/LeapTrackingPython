@@ -193,11 +193,17 @@ class GameEngine:
 
         is_correct = target_missile is not None
 
-        # Log the finger press event
+        # Log the finger press event with missile spawn time for reaction time calculation
+        import time
+        press_time_ms = time.time() * 1000
+        missile_spawn_time_ms = target_missile.spawn_time_ms if target_missile else press_time_ms
+
         events['finger_presses'].append({
             'finger': finger_name,
             'target': target_finger,
             'correct': is_correct,
+            'press_time_ms': press_time_ms,
+            'missile_spawn_time_ms': missile_spawn_time_ms,
         })
 
         if is_correct:

@@ -4,7 +4,10 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .kinematics import TrialMetrics
 
 
 class SessionLogger:
@@ -52,7 +55,13 @@ class SessionLogger:
                 "wrong_presses": 0,
                 "missiles_missed": 0,
                 "accuracy": 0.0,
-            }
+                "clean_trials": 0,
+                "coupled_keypresses": 0,
+                "average_mlr": 0.0,
+                "average_reaction_time_ms": 0.0,
+            },
+            "mlr_values": [],  # For calculating running average
+            "reaction_times": [],  # For calculating running average
         }
 
         self._save_session()
@@ -67,10 +76,11 @@ class SessionLogger:
         right_hand_data: Optional[Dict],
         score: int,
         lives: int,
-        difficulty: str
+        difficulty: str,
+        trial_metrics: Optional['TrialMetrics'] = None
     ):
         """
-        Log a finger press event with full hand tracking data.
+        Log a finger press event with full hand tracking data and biomechanical metrics.
 
         Args:
             finger_pressed: Name of the finger that was pressed
@@ -81,6 +91,7 @@ class SessionLogger:
             score: Current score
             lives: Current lives
             difficulty: Current difficulty level
+            trial_metrics: Optional biomechanical metrics from kinematics processor
         """
         if not self.session_data:
             return
@@ -106,6 +117,20 @@ class SessionLogger:
             }
         }
 
+        # Add biomechanical metrics if available
+        if trial_metrics:
+            event["biomechanics"] = {
+                "reaction_time_ms": round(trial_metrics.reaction_time_ms, 2),
+                "is_wrong_finger": trial_metrics.is_wrong_finger,
+                "motion_leakage_ratio": round(trial_metrics.motion_leakage_ratio, 4),
+                "target_path_length_mm": round(trial_metrics.target_path_length, 2),
+                "coupled_keypress": trial_metrics.coupled_keypress,
+                "is_clean_trial": trial_metrics.is_clean_trial,
+                "non_target_path_lengths": {
+                    k: round(v, 2) for k, v in trial_metrics.non_target_path_lengths.items()
+                }
+            }
+
         self.session_data["events"].append(event)
 
         # Update summary
@@ -118,6 +143,24 @@ class SessionLogger:
         total = self.session_data["summary"]["total_presses"]
         correct = self.session_data["summary"]["correct_presses"]
         self.session_data["summary"]["accuracy"] = round(correct / total * 100, 2)
+
+        # Update biomechanical summary if metrics available
+        if trial_metrics:
+            if trial_metrics.is_clean_trial:
+                self.session_data["summary"]["clean_trials"] += 1
+            if trial_metrics.coupled_keypress:
+                self.session_data["summary"]["coupled_keypresses"] += 1
+
+            # Track MLR and reaction time for averages
+            if trial_metrics.motion_leakage_ratio != float('inf'):
+                self.session_data["mlr_values"].append(trial_metrics.motion_leakage_ratio)
+                avg_mlr = sum(self.session_data["mlr_values"]) / len(self.session_data["mlr_values"])
+                self.session_data["summary"]["average_mlr"] = round(avg_mlr, 4)
+
+            if trial_metrics.reaction_time_ms > 0:
+                self.session_data["reaction_times"].append(trial_metrics.reaction_time_ms)
+                avg_rt = sum(self.session_data["reaction_times"]) / len(self.session_data["reaction_times"])
+                self.session_data["summary"]["average_reaction_time_ms"] = round(avg_rt, 2)
 
         self._save_session()
 
