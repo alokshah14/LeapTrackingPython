@@ -437,6 +437,14 @@ class FingerInvaders:
         if state == GameState.MENU:
             self.menu_ui.draw_main_menu(self.calibration.has_calibration())
 
+            # Show hand position overlay if calibration exists
+            if self.calibration.has_calibration():
+                hand_data = self.leap_controller.update()
+                position_status = self.calibration.check_hand_positions(hand_data)
+                calibrated_positions = self.calibration.get_calibrated_palm_positions()
+                if calibrated_positions.get('left') or calibrated_positions.get('right'):
+                    self.menu_ui.draw_hand_position_overlay(position_status, calibrated_positions)
+
         elif state == GameState.CALIBRATION_MENU:
             self.menu_ui.draw_calibration_menu(self.calibration.has_calibration())
 

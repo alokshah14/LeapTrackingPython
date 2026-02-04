@@ -590,3 +590,67 @@ class MenuUI:
         inst = self.fonts['medium'].render("Press SPACE to continue", True, (150, 150, 200))
         inst_rect = inst.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT - 80))
         self.surface.blit(inst, inst_rect)
+
+    def draw_hand_position_overlay(self, position_status: Dict, calibrated_positions: Dict):
+        """
+        Draw an overlay showing hand position guidance for starting the game.
+
+        Args:
+            position_status: Result from calibration.check_hand_positions()
+            calibrated_positions: Calibrated palm positions from calibration
+        """
+        overlay_y = WINDOW_HEIGHT - 180
+
+        # Draw background panel
+        panel_rect = pygame.Rect(50, overlay_y - 20, WINDOW_WIDTH - 100, 120)
+        pygame.draw.rect(self.surface, (20, 20, 40), panel_rect, border_radius=10)
+        pygame.draw.rect(self.surface, (60, 60, 100), panel_rect, 2, border_radius=10)
+
+        # Title
+        title = self.fonts['small'].render("Position your hands to start", True, (150, 150, 200))
+        self.surface.blit(title, (panel_rect.centerx - title.get_width() // 2, overlay_y - 10))
+
+        # Draw hand indicators
+        hand_y = overlay_y + 30
+        for i, hand_type in enumerate(['left', 'right']):
+            hand_x = 150 if hand_type == 'left' else WINDOW_WIDTH - 150
+
+            # Get calibrated position
+            cal_pos = calibrated_positions.get(hand_type)
+            if cal_pos is None:
+                continue
+
+            # Get current status
+            in_position = position_status.get(f'{hand_type}_in_position', False)
+            distance = position_status.get(f'{hand_type}_distance')
+
+            # Determine color based on distance
+            if in_position:
+                color = (50, 255, 50)  # Green
+                status_text = "READY"
+            elif distance is not None:
+                if distance < 100:
+                    color = (255, 255, 50)  # Yellow
+                    status_text = f"{distance:.0f}mm"
+                else:
+                    color = (255, 100, 100)  # Red
+                    status_text = f"{distance:.0f}mm"
+            else:
+                color = (100, 100, 100)  # Gray - hand not detected
+                status_text = "NOT FOUND"
+
+            # Draw hand icon (simple circle representation)
+            pygame.draw.circle(self.surface, color, (hand_x, hand_y), 30, 3)
+
+            # Draw hand label
+            label = self.fonts['small'].render(f"{hand_type.upper()}", True, color)
+            self.surface.blit(label, (hand_x - label.get_width() // 2, hand_y - 50))
+
+            # Draw status
+            status = self.fonts['small'].render(status_text, True, color)
+            self.surface.blit(status, (hand_x - status.get_width() // 2, hand_y + 40))
+
+        # Check if both ready
+        if position_status.get('both_in_position', False):
+            ready_text = self.fonts['medium'].render("HANDS IN POSITION - Press ENTER to start!", True, (50, 255, 50))
+            self.surface.blit(ready_text, (WINDOW_WIDTH // 2 - ready_text.get_width() // 2, overlay_y + 85))
