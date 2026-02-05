@@ -20,6 +20,7 @@ class GameState:
     MENU = 'menu'
     CALIBRATION_MENU = 'calibration_menu'
     CALIBRATING = 'calibrating'
+    WAITING_FOR_HANDS = 'waiting_for_hands'  # Pre-game: waiting for hands in position
     PLAYING = 'playing'
     PAUSED = 'paused'
     GAME_OVER = 'game_over'

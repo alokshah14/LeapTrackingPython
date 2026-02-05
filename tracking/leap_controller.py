@@ -119,17 +119,30 @@ class LeapController:
                                    intermediate.next_joint.y - intermediate.prev_joint.y,
                                    intermediate.next_joint.z - intermediate.prev_joint.z)
 
+                # Extract full bone geometry for 3D rendering
+                bones = {}
+                bone_names = ['metacarpal', 'proximal', 'intermediate', 'distal']
+                bone_objects = [digit.metacarpal, digit.proximal, digit.intermediate, digit.distal]
+                for bone_name, bone in zip(bone_names, bone_objects):
+                    bones[bone_name] = {
+                        'start': (bone.prev_joint.x, bone.prev_joint.y, bone.prev_joint.z),
+                        'end': (bone.next_joint.x, bone.next_joint.y, bone.next_joint.z),
+                    }
+
                 fingers[finger_name] = {
                     'tip_position': (tip.x, tip.y, tip.z),
                     'extended': digit.is_extended,
                     'proximal_direction': proximal_dir,
                     'intermediate_direction': intermediate_dir,
+                    'bones': bones,
+                    'valid': True,
                 }
 
             palm = hand.palm
 
             new_hands[hand_type] = {
                 'visible': True,
+                'valid': True,
                 'palm_position': (palm.position.x, palm.position.y, palm.position.z),
                 'palm_normal': (palm.normal.x, palm.normal.y, palm.normal.z),
                 'fingers': fingers,
@@ -227,34 +240,72 @@ class SimulatedLeapController(LeapController):
         for hand_type in ['left', 'right']:
             fingers = {}
             finger_names = ['thumb', 'index', 'middle', 'ring', 'pinky']
+            # X offsets for each finger from palm center
+            finger_x_offsets = {'thumb': 40, 'index': 20, 'middle': 0, 'ring': -20, 'pinky': -40}
+            if hand_type == 'right':
+                finger_x_offsets = {k: -v for k, v in finger_x_offsets.items()}
+
+            palm_x = -100 if hand_type == 'left' else 100
 
             for finger_name in finger_names:
                 key = f"{hand_type}_{finger_name}"
                 is_pressed = self.simulated_finger_states.get(key, False)
-                tip_y = self.base_finger_y + (-50.0 if is_pressed else 0.0)
+
+                finger_x = palm_x + finger_x_offsets[finger_name]
+                base_y = self.base_palm_y
 
                 # Simulate bone directions - when pressed, angle between bones is ~45 degrees
                 # When relaxed, bones are roughly aligned (angle ~0)
                 if is_pressed:
-                    # Pressed: proximal points up, intermediate points down-forward (45 degree angle)
                     proximal_dir = (0.0, 1.0, 0.0)
                     angle_rad = math.radians(45)
                     intermediate_dir = (0.0, math.cos(angle_rad), math.sin(angle_rad))
                 else:
-                    # Relaxed: both roughly pointing up
                     proximal_dir = (0.0, 1.0, 0.0)
-                    intermediate_dir = (0.0, 1.0, 0.1)  # Slight forward tilt when relaxed
+                    intermediate_dir = (0.0, 1.0, 0.1)
+
+                # Generate simulated bone positions
+                bone_length = 25.0
+                bones = {}
+                # Metacarpal: from palm
+                bones['metacarpal'] = {
+                    'start': (finger_x, base_y, 0),
+                    'end': (finger_x, base_y + bone_length, 0),
+                }
+                # Proximal
+                bones['proximal'] = {
+                    'start': (finger_x, base_y + bone_length, 0),
+                    'end': (finger_x, base_y + bone_length * 2, 0),
+                }
+                # Intermediate - bends when pressed
+                bend_y = bone_length * 0.7 if is_pressed else bone_length
+                bend_z = bone_length * 0.7 if is_pressed else 0
+                bones['intermediate'] = {
+                    'start': (finger_x, base_y + bone_length * 2, 0),
+                    'end': (finger_x, base_y + bone_length * 2 + bend_y, bend_z),
+                }
+                # Distal
+                bones['distal'] = {
+                    'start': bones['intermediate']['end'],
+                    'end': (finger_x, bones['intermediate']['end'][1] + bone_length * 0.5,
+                           bones['intermediate']['end'][2] + (bone_length * 0.3 if is_pressed else 0)),
+                }
+
+                tip_pos = bones['distal']['end']
 
                 fingers[finger_name] = {
-                    'tip_position': (0.0, tip_y, 0.0),
+                    'tip_position': tip_pos,
                     'extended': not is_pressed,
                     'proximal_direction': proximal_dir,
                     'intermediate_direction': intermediate_dir,
+                    'bones': bones,
+                    'valid': True,
                 }
 
             self.hands_data[hand_type] = {
                 'visible': True,
-                'palm_position': (0.0, self.base_palm_y, 0.0),
+                'valid': True,
+                'palm_position': (palm_x, self.base_palm_y, 0.0),
                 'palm_normal': (0.0, -1.0, 0.0),
                 'fingers': fingers,
                 'grab_strength': 0.0,

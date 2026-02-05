@@ -17,7 +17,7 @@ pygame.init()
 # Import game modules
 from game.constants import (
     WINDOW_WIDTH, WINDOW_HEIGHT, FPS, GAME_TITLE,
-    FINGER_NAMES
+    FINGER_NAMES, GAME_AREA_BOTTOM
 )
 from game.game_engine import GameEngine, GameState
 from game.high_scores import HighScoreManager
@@ -28,9 +28,12 @@ from tracking.session_logger import SessionLogger
 from tracking.kinematics import KinematicsProcessor
 from tracking.trial_summary import TrialSummaryExporter
 from ui.game_ui import GameUI, MenuUI
-from ui.hand_renderer import HandRenderer, CalibrationHandRenderer
+from ui.hand_renderer_3d import OpenGLHandRenderer
+from ui.hand_renderer import HandRenderer as OldHandRenderer, CalibrationHandRenderer
 from ui.colors import BACKGROUND
 from game.sound_manager import SoundManager
+from OpenGL.GL import *
+from OpenGL.GLU import *
 
 
 class FingerInvaders:
@@ -38,8 +41,15 @@ class FingerInvaders:
 
     def __init__(self):
         """Initialize the game application."""
-        # Set up display
-        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+        # Set up display with OpenGL
+        pygame.display.gl_set_attribute(pygame.GL_DEPTH_SIZE, 24)
+        pygame.display.gl_set_attribute(pygame.GL_STENCIL_SIZE, 8)
+        pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.DOUBLEBUF | pygame.OPENGL)
+        self.screen = pygame.display.get_surface() # This is the OpenGL context surface
+
+        # Create an off-screen surface for 2D Pygame rendering
+        self.pygame_2d_surface = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+
         pygame.display.set_caption(GAME_TITLE)
         self.clock = pygame.time.Clock()
 
@@ -74,11 +84,12 @@ class FingerInvaders:
         # Initialize sound manager
         self.sound_manager = SoundManager()
 
-        # Initialize UI components
-        self.game_ui = GameUI(self.screen)
-        self.menu_ui = MenuUI(self.screen)
-        self.hand_renderer = HandRenderer(self.screen)
-        self.calibration_renderer = CalibrationHandRenderer(self.screen)
+        # Initialize UI components (all drawing to the off-screen 2D surface)
+        self.game_ui = GameUI(self.pygame_2d_surface)
+        self.menu_ui = MenuUI(self.pygame_2d_surface)
+        self.hand_renderer = OpenGLHandRenderer(self.screen) # 3D renderer still uses main screen
+        self.calibration_renderer = CalibrationHandRenderer(self.pygame_2d_surface)
+        self.old_hand_renderer = OldHandRenderer(self.pygame_2d_surface) # Keep for angle bars etc.
 
         # Keyboard simulation mapping (for testing without Leap Motion)
         self.key_finger_map = {
@@ -99,8 +110,93 @@ class FingerInvaders:
         self.new_high_score_value = 0
         self.celebration_animation = 0
 
+        # Hand position warning state
+        self.hands_not_ready_message_time = 0
+
+        # Waiting for hands state
+        self.waiting_countdown = None  # Countdown before game starts (seconds)
+
         # Running state
         self.running = True
+
+        # Initialize OpenGL for 2D overlay
+        self._init_2d_opengl()
+
+    def _init_2d_opengl(self):
+        """Initializes OpenGL settings for drawing the 2D Pygame overlay."""
+        glEnable(GL_TEXTURE_2D)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glClearColor(0.0, 0.0, 0.0, 0.0) # Clear to black, but will be overwritten by 2D surface
+
+    def _get_texture(self, surface):
+        """Converts a pygame surface into an OpenGL texture."""
+        # Don't flip - we'll handle orientation in texture coordinates
+        texture_data = pygame.image.tostring(surface, "RGBA", False)
+        width, height = surface.get_size()
+
+        texture_id = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, texture_id)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture_data)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        return texture_id, width, height
+
+    def _draw_2d_overlay_with_opengl(self):
+        """Renders the 2D Pygame surface as an OpenGL texture overlay."""
+        # Disable depth test and lighting for 2D overlay
+        glDisable(GL_DEPTH_TEST)
+        glDisable(GL_LIGHTING)
+
+        # Enable texturing and blending
+        glEnable(GL_TEXTURE_2D)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        # Use scissor test to only draw in the game area (exclude hand area at bottom)
+        # OpenGL coords: y=0 at bottom. Hand area is at bottom (y=0 to y=200)
+        # Game area is from y=200 to y=900
+        glEnable(GL_SCISSOR_TEST)
+        hand_area_height = WINDOW_HEIGHT - GAME_AREA_BOTTOM  # 200 pixels
+        glScissor(0, hand_area_height, WINDOW_WIDTH, GAME_AREA_BOTTOM)
+
+        # Reset viewport to full screen
+        glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
+
+        # Orthographic projection for 2D rendering
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        gluOrtho2D(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT)
+
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        # Generate texture from Pygame surface
+        texture_id, tex_width, tex_height = self._get_texture(self.pygame_2d_surface)
+
+        # Draw full textured quad (scissor will clip to game area)
+        glBindTexture(GL_TEXTURE_2D, texture_id)
+        glColor4f(1.0, 1.0, 1.0, 1.0)
+        glBegin(GL_QUADS)
+        # Flip texture vertically (Pygame Y=0 top, OpenGL Y=0 bottom)
+        glTexCoord2f(0, 1); glVertex2f(0, 0)
+        glTexCoord2f(1, 1); glVertex2f(WINDOW_WIDTH, 0)
+        glTexCoord2f(1, 0); glVertex2f(WINDOW_WIDTH, WINDOW_HEIGHT)
+        glTexCoord2f(0, 0); glVertex2f(0, WINDOW_HEIGHT)
+        glEnd()
+
+        glDeleteTextures(1, [texture_id])
+
+        glDisable(GL_SCISSOR_TEST)
+
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+
+        glDisable(GL_TEXTURE_2D)
 
     def run(self):
         """Main game loop."""
@@ -114,7 +210,21 @@ class FingerInvaders:
             self._update(dt)
 
             # Render
-            self._render()
+            # --- START 2D Pygame Rendering ---
+            # Clear the off-screen 2D surface with transparent black
+            self.pygame_2d_surface.fill((0, 0, 0, 0))
+
+            self._render()  # Draw to self.pygame_2d_surface
+
+            # --- OpenGL Combined Rendering ---
+            # Clear the OpenGL buffers
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+            # Draw 3D hands first (in the hand area viewport)
+            self.hand_renderer.draw()
+
+            # Then overlay the 2D Pygame surface on top (with transparency)
+            self._draw_2d_overlay_with_opengl()
 
             pygame.display.flip()
 
@@ -145,7 +255,7 @@ class FingerInvaders:
         elif event.key == pygame.K_b:
             # Toggle angle bars during gameplay
             if state == GameState.PLAYING:
-                enabled = self.hand_renderer.toggle_angle_bars()
+                enabled = self.old_hand_renderer.toggle_angle_bars()
                 print(f"Angle bars {'enabled' if enabled else 'disabled'}")
 
         elif event.key == pygame.K_ESCAPE:
@@ -165,6 +275,9 @@ class FingerInvaders:
             elif state == GameState.CALIBRATION_MENU:
                 self.game_engine.state = GameState.MENU
             elif state == GameState.HIGH_SCORES:
+                self.game_engine.state = GameState.MENU
+            elif state == GameState.WAITING_FOR_HANDS:
+                # Cancel waiting, go back to menu
                 self.game_engine.state = GameState.MENU
             elif state == GameState.NEW_HIGH_SCORE:
                 # Skip celebration, go to game over
@@ -220,11 +333,9 @@ class FingerInvaders:
         option = self.menu_ui.get_selected_option()
 
         if option == 0 and self.calibration.has_calibration():
-            # Start Game
-            self.game_engine.start_game()
-            # Start session logging with calibration data
-            self.session_logger.start_session(self.calibration.calibration_data)
-            self.trial_summary.start_session()
+            # Go to waiting for hands state
+            self.game_engine.state = GameState.WAITING_FOR_HANDS
+            self.waiting_countdown = None  # Will be set when hands are in position
         elif option == 1:
             # Calibrate
             self.game_engine.state = GameState.CALIBRATION_MENU
@@ -305,7 +416,7 @@ class FingerInvaders:
 
                     # Show clean trial indicator if applicable
                     if trial_metrics.is_clean_trial:
-                        self.hand_renderer.show_clean_trial(trial_metrics.motion_leakage_ratio)
+                        self.old_hand_renderer.show_clean_trial(trial_metrics.motion_leakage_ratio)
 
                     # Record trial for clean summary export
                     self.trial_summary.record_trial(
@@ -365,13 +476,13 @@ class FingerInvaders:
                 self.sound_manager.play_explosion()
 
             # Update hand highlighting
-            self.hand_renderer.set_highlighted_fingers(self.game_engine.get_highlighted_fingers())
+            self.old_hand_renderer.set_highlighted_fingers(self.game_engine.get_highlighted_fingers())
 
             # Update finger angle data for display
             finger_angles = self.hand_tracker.get_all_finger_angles()
-            self.hand_renderer.set_finger_angles(
+            self.old_hand_renderer.set_finger_angles(
                 finger_angles,
-                self.calibration.baseline_angles
+                self.calibration.calibration_data.get('baseline_angles', {})
             )
 
         elif state == GameState.CALIBRATING:
@@ -384,6 +495,27 @@ class FingerInvaders:
                 if self.game_engine.pause_reason == "HANDS NOT DETECTED":
                     self.game_engine.resume_game()
 
+        elif state == GameState.WAITING_FOR_HANDS:
+            # Check if hands are in calibrated position
+            hand_data = self.leap_controller.update()
+            position_status = self.calibration.check_hand_positions(hand_data)
+
+            if position_status['both_in_position']:
+                # Hands are in position - start or continue countdown
+                if self.waiting_countdown is None:
+                    self.waiting_countdown = 3.0  # 3 second countdown
+                else:
+                    self.waiting_countdown -= dt * 0.0167  # Roughly 1 second per 60 frames
+                    if self.waiting_countdown <= 0:
+                        # Start the game!
+                        self.game_engine.start_game()
+                        self.session_logger.start_session(self.calibration.calibration_data)
+                        self.trial_summary.start_session()
+                        self.waiting_countdown = None
+            else:
+                # Hands not in position - reset countdown
+                self.waiting_countdown = None
+
         elif state == GameState.NEW_HIGH_SCORE:
             # Update celebration animation
             self.celebration_animation += dt * 0.1
@@ -392,6 +524,11 @@ class FingerInvaders:
         self.game_ui.update(dt)
         self.menu_ui.update(dt)
         self.hand_renderer.update(dt)
+        self.old_hand_renderer.update(dt)
+
+        # Decay hands not ready message timer
+        if self.hands_not_ready_message_time > 0:
+            self.hands_not_ready_message_time -= dt * 0.05
 
     def _update_calibration(self, dt: float):
         """Update calibration process."""
@@ -445,11 +582,18 @@ class FingerInvaders:
                 if calibrated_positions.get('left') or calibrated_positions.get('right'):
                     self.menu_ui.draw_hand_position_overlay(position_status, calibrated_positions)
 
+            # Show warning if hands not in position when trying to start
+            if self.hands_not_ready_message_time > 0:
+                self._draw_hands_not_ready_warning()
+
         elif state == GameState.CALIBRATION_MENU:
             self.menu_ui.draw_calibration_menu(self.calibration.has_calibration())
 
         elif state == GameState.CALIBRATING:
             self._render_calibration()
+
+        elif state == GameState.WAITING_FOR_HANDS:
+            self._render_waiting_for_hands()
 
         elif state == GameState.PLAYING:
             self._render_game()
@@ -484,14 +628,14 @@ class FingerInvaders:
         # Lanes
         self.game_ui.draw_lanes(game_state['target_fingers'])
 
-        # Enemy missiles
+        # Enemy missiles - draw to 2D surface
         for missile in game_state['enemy_missiles']:
-            missile.draw(self.screen)
-            missile.draw_warning(self.screen)
+            missile.draw(self.pygame_2d_surface)
+            missile.draw_warning(self.pygame_2d_surface)
 
-        # Player missiles
+        # Player missiles - draw to 2D surface
         for missile in game_state['player_missiles']:
-            missile.draw(self.screen)
+            missile.draw(self.pygame_2d_surface)
 
         # Explosions
         self.game_ui.draw_explosions()
@@ -504,15 +648,25 @@ class FingerInvaders:
             game_state['streak']
         )
 
-        # Hand visualization
+        # Update 3D hand data (actual drawing happens in main loop after 2D overlay)
         hand_data = self.hand_tracker.get_display_data()
         finger_states = self.hand_tracker.get_all_finger_states()
-        self.hand_renderer.draw(hand_data, finger_states)
+        highlighted_fingers = set(self.game_engine.get_highlighted_fingers())
+        self.hand_renderer.set_hand_data(hand_data, finger_states, highlighted_fingers)
+
+        # Hand visualization (2D elements from old renderer)
+        self.old_hand_renderer.set_highlighted_fingers(self.game_engine.get_highlighted_fingers())
+        finger_angles = self.hand_tracker.get_all_finger_angles()
+        self.old_hand_renderer.set_finger_angles(
+            finger_angles,
+            self.calibration.calibration_data.get('baseline_angles', {})
+        )
+        self.old_hand_renderer._draw_finger_labels()  # Draw only labels
+        self.old_hand_renderer._draw_angle_bars(finger_states)  # Draw angle bars
+        self.old_hand_renderer._draw_clean_trial_indicator()  # Draw clean trial indicator
 
     def _render_calibration(self):
         """Render calibration screen."""
-        self.screen.fill(BACKGROUND)
-
         # Get calibration status
         status = self.calibration.get_calibration_status()
         instructions = self.calibration.get_instructions()
@@ -522,13 +676,17 @@ class FingerInvaders:
         finger_states = self.hand_tracker.get_all_finger_states()
         self.calibration_renderer.draw(hand_data, finger_states)
 
+        # Update 3D hand renderer so hands show in the bottom area
+        highlighted = {self.calibration.get_current_finger()} if self.calibration.get_current_finger() else set()
+        self.hand_renderer.set_hand_data(hand_data, finger_states, highlighted)
+
         # Draw calibration overlay
         self.calibration_renderer.draw_calibration_overlay(instructions, status)
 
         # Draw title
         font = pygame.font.Font(None, 56)
         title = font.render("CALIBRATION MODE", True, (255, 255, 255))
-        self.screen.blit(title, (WINDOW_WIDTH // 2 - title.get_width() // 2, 30))
+        self.pygame_2d_surface.blit(title, (WINDOW_WIDTH // 2 - title.get_width() // 2, 30))
 
         # Draw instructions for simulation mode
         if isinstance(self.leap_controller, SimulatedLeapController):
@@ -537,7 +695,88 @@ class FingerInvaders:
                 "Simulation Mode: Use Q-W-E-R-T (left) and Y-U-I-O-P (right) keys",
                 True, (150, 150, 200)
             )
-            self.screen.blit(sim_text, (WINDOW_WIDTH // 2 - sim_text.get_width() // 2, 80))
+            self.pygame_2d_surface.blit(sim_text, (WINDOW_WIDTH // 2 - sim_text.get_width() // 2, 80))
+
+    def _render_waiting_for_hands(self):
+        """Render the waiting for hands screen."""
+        # Dark background
+        self.pygame_2d_surface.fill((20, 20, 40))
+
+        # Title
+        font_title = pygame.font.Font(None, 64)
+        title = font_title.render("POSITION YOUR HANDS", True, (255, 255, 255))
+        self.pygame_2d_surface.blit(title, (WINDOW_WIDTH // 2 - title.get_width() // 2, 80))
+
+        # Instructions
+        font_inst = pygame.font.Font(None, 32)
+        inst1 = font_inst.render("Place your hands above the Leap Motion sensor", True, (200, 200, 200))
+        inst2 = font_inst.render("in the same position as during calibration", True, (200, 200, 200))
+        self.pygame_2d_surface.blit(inst1, (WINDOW_WIDTH // 2 - inst1.get_width() // 2, 160))
+        self.pygame_2d_surface.blit(inst2, (WINDOW_WIDTH // 2 - inst2.get_width() // 2, 195))
+
+        # Get current hand positions and draw status
+        hand_data = self.leap_controller.update()
+        position_status = self.calibration.check_hand_positions(hand_data)
+        calibrated_positions = self.calibration.get_calibrated_palm_positions()
+
+        # Draw hand position indicators
+        self.menu_ui.draw_hand_position_overlay(position_status, calibrated_positions, large=True)
+
+        # Show countdown if hands are in position
+        if self.waiting_countdown is not None:
+            font_countdown = pygame.font.Font(None, 120)
+            countdown_num = max(1, int(self.waiting_countdown) + 1)
+            countdown_text = font_countdown.render(str(countdown_num), True, (100, 255, 100))
+            self.pygame_2d_surface.blit(countdown_text,
+                (WINDOW_WIDTH // 2 - countdown_text.get_width() // 2, 350))
+
+            ready_text = font_inst.render("GET READY!", True, (100, 255, 100))
+            self.pygame_2d_surface.blit(ready_text,
+                (WINDOW_WIDTH // 2 - ready_text.get_width() // 2, 480))
+        else:
+            # Show waiting status
+            if position_status.get('left_in_position') and position_status.get('right_in_position'):
+                status_text = "Both hands in position!"
+                status_color = (100, 255, 100)
+            elif position_status.get('left_in_position'):
+                status_text = "Left hand OK - Position right hand"
+                status_color = (255, 255, 100)
+            elif position_status.get('right_in_position'):
+                status_text = "Right hand OK - Position left hand"
+                status_color = (255, 255, 100)
+            else:
+                status_text = "Position both hands..."
+                status_color = (255, 150, 150)
+
+            status_render = font_inst.render(status_text, True, status_color)
+            self.pygame_2d_surface.blit(status_render,
+                (WINDOW_WIDTH // 2 - status_render.get_width() // 2, 400))
+
+        # ESC to cancel
+        font_small = pygame.font.Font(None, 24)
+        esc_text = font_small.render("Press ESC to cancel", True, (150, 150, 150))
+        self.pygame_2d_surface.blit(esc_text, (WINDOW_WIDTH // 2 - esc_text.get_width() // 2, 550))
+
+    def _draw_hands_not_ready_warning(self):
+        """Draw warning message when hands are not in position."""
+        # Semi-transparent overlay
+        overlay = pygame.Surface((500, 100), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 200))
+
+        # Warning text
+        font_large = pygame.font.Font(None, 42)
+        font_small = pygame.font.Font(None, 28)
+
+        title = font_large.render("HANDS NOT IN POSITION", True, (255, 100, 100))
+        subtitle = font_small.render("Place hands in calibrated position to start", True, (255, 255, 255))
+
+        # Center on screen
+        overlay_x = (WINDOW_WIDTH - 500) // 2
+        overlay_y = WINDOW_HEIGHT // 2 - 50
+
+        self.pygame_2d_surface.blit(overlay, (overlay_x, overlay_y))
+        self.pygame_2d_surface.blit(title, (overlay_x + 250 - title.get_width() // 2, overlay_y + 20))
+        self.pygame_2d_surface.blit(subtitle, (overlay_x + 250 - subtitle.get_width() // 2, overlay_y + 60))
 
     def _cleanup(self):
         """Clean up resources."""

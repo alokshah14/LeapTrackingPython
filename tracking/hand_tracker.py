@@ -277,12 +277,19 @@ class HandTracker:
                     'pressed': self.finger_states.get(full_name, False),
                     'relative_y': self.finger_relative_y.get(full_name, 0.0),
                     'threshold': self.calibration.get_threshold(full_name),
+                    'valid': finger_data.get('valid', True),
+                    # Include bone data for 3D rendering
+                    'metacarpal': finger_data.get('bones', {}).get('metacarpal'),
+                    'proximal': finger_data.get('bones', {}).get('proximal'),
+                    'intermediate': finger_data.get('bones', {}).get('intermediate'),
+                    'distal': finger_data.get('bones', {}).get('distal'),
                 }
 
             display_data[hand_type] = {
                 'palm_position': hand['palm_position'],
                 'fingers': fingers,
                 'visible': True,
+                'valid': True,
             }
 
         return display_data
