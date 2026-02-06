@@ -69,9 +69,14 @@ LeapTrackingPython/
 │   └── trials_*.csv/json   # Clean trial summaries with biomechanics
 ├── ui/
 │   ├── __init__.py
-│   ├── hand_renderer.py    # Hand visualization
+│   ├── hand_renderer.py    # 2D Hand visualization (angle bars, labels)
+│   ├── hand_renderer_3d.py # 3D OpenGL hand rendering
 │   ├── game_ui.py          # HUD, menus, overlays
 │   └── colors.py           # Color definitions
+├── analysis/               # Session analysis tools
+│   ├── __init__.py
+│   ├── session_analyzer.py # Load and visualize session logs
+│   └── session_analysis_demo.ipynb  # Jupyter notebook with examples
 ├── calibration_data.json   # Saved calibration (generated)
 ├── requirements.txt        # Python dependencies
 ├── claude.md               # This documentation file
@@ -414,3 +419,107 @@ Potential game modes for finger individuation rehabilitation:
    - Handle `NEW_HIGH_SCORE` state (SPACE continues to game over, ESC skips)
    - Celebration animation timer
    - Play celebration sound when high score achieved
+
+### 2026-02-06
+
+#### 3D OpenGL Hand Rendering
+**User Request**: Hands were not showing up in calibration mode
+
+**Root Cause**: The game had been migrated to use 3D OpenGL hand rendering, but the calibration mode wasn't feeding hand data to the 3D renderer.
+
+**Implementation**:
+
+1. **ui/hand_renderer_3d.py** (New File):
+   - `OpenGLHandRenderer` class for 3D hand visualization
+   - Uses PyOpenGL with proper lighting and depth testing
+   - `set_hand_data()` method to receive tracking data
+   - Renders hands in dedicated viewport at bottom of screen
+
+2. **main.py** - Rendering Pipeline:
+   - Creates off-screen pygame surface for 2D UI elements
+   - Uses scissor test to composite 2D overlay over 3D hand area
+   - `_draw_2d_overlay_with_opengl()` renders 2D surface as texture
+   - Game area (missiles, HUD) rendered as 2D
+   - Hand area rendered as 3D OpenGL
+
+3. **Fix for calibration**:
+   - Added `self.hand_renderer.set_hand_data()` call in `_render_calibration()`
+   - Now feeds hand tracking data to 3D renderer during calibration
+   - Highlights the currently-calibrating finger
+
+#### Calibration Finger Highlighting Fix
+**Issue**: Left pinky was incorrectly highlighted during baseline capture phases
+
+**Root Cause**: `calibration.py`'s `get_current_finger()` returned `FINGER_NAMES[0]` (left_pinky) whenever `current_finger_index` was 0, regardless of calibration phase.
+
+**Fix** in `tracking/calibration.py`:
+```python
+def get_current_finger(self) -> Optional[str]:
+    # Only return a finger when actually calibrating individual fingers
+    if self.calibration_phase != 'calibrating_finger':
+        return None
+    if self.current_finger_index < len(FINGER_NAMES):
+        return FINGER_NAMES[self.current_finger_index]
+    return None
+```
+
+#### Session Analysis Tools
+**User Request**: Create Python script to analyze and plot session log data in Jupyter
+
+**Implementation**:
+
+1. **analysis/session_analyzer.py** (New Module):
+   - `SessionAnalyzer` class to load and parse session JSON logs
+   - `Trial` dataclass with all per-trial data and biomechanics
+   - `list_sessions()` - Find all available session files
+   - `compare_sessions()` - Compare multiple sessions side-by-side
+
+2. **Plotting Methods**:
+   - `plot_session_overview()` - Multi-panel dashboard:
+     - Trial timeline with correct/incorrect markers
+     - Reaction time per trial (bar chart)
+     - MLR per trial with clean threshold line
+     - Accuracy breakdown by finger
+     - Score progression over time
+   - `plot_trial(n)` - Detailed single trial view:
+     - Top-down view (X-Z plane) of hand positions
+     - Front view (X-Y plane) showing height
+     - Target finger highlighted with star marker
+   - `plot_all_trials_sequence()` - Horizontal strip of all trials
+   - `plot_finger_heatmap()` - Confusion matrix (target vs pressed)
+
+3. **Data Export**:
+   - `to_dataframe()` - Export trials to pandas DataFrame
+   - Enables custom analysis in pandas/numpy
+
+4. **analysis/session_analysis_demo.ipynb** - Jupyter Notebook:
+   - Step-by-step examples of all analysis features
+   - Session overview plotting
+   - Individual trial inspection
+   - Multi-session comparison
+   - Progress tracking over sessions
+
+**Usage**:
+```python
+from analysis import SessionAnalyzer, list_sessions
+
+# List available sessions
+sessions = list_sessions('session_logs')
+
+# Load and analyze
+analyzer = SessionAnalyzer()
+analyzer.load_session(sessions[0])
+
+# Plot overview
+analyzer.plot_session_overview()
+
+# View specific trial
+analyzer.plot_trial(1)
+
+# Export to DataFrame
+df = analyzer.to_dataframe()
+```
+
+**Dependencies Added**:
+- matplotlib (for plotting)
+- pandas (for DataFrame export, optional)
