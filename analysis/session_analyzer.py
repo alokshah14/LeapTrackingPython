@@ -25,6 +25,9 @@ try:
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
     from matplotlib.gridspec import GridSpec
+    from mpl_toolkits.mplot3d import Axes3D
+    from mpl_toolkits.mplot3d.art3d import Line3DCollection
+    import matplotlib.animation as animation
     HAS_MATPLOTLIB = True
 except ImportError:
     HAS_MATPLOTLIB = False
@@ -584,6 +587,407 @@ class SessionAnalyzer:
                                        edgecolor='green', linewidth=2))
 
         plt.colorbar(im, label='Count')
+        plt.tight_layout()
+        return fig
+
+    # ========== 3D Visualization Methods ==========
+
+    def plot_3d_session(self, figsize: Tuple[int, int] = (14, 10),
+                        show_trajectories: bool = True,
+                        color_by: str = 'finger'):
+        """
+        Plot full 3D visualization of the entire session.
+
+        Shows all hand positions across all trials in 3D space.
+
+        Args:
+            figsize: Figure size
+            show_trajectories: If True, draw lines connecting finger positions over time
+            color_by: 'finger' (color by finger), 'time' (gradient over time),
+                     'correct' (green/red by correctness)
+        """
+        if not HAS_MATPLOTLIB:
+            raise ImportError("matplotlib is required for plotting")
+
+        if not self.trials:
+            print("No trials to plot")
+            return
+
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Collect all finger positions over time
+        finger_trajectories = {f: {'x': [], 'y': [], 'z': [], 't': []} for f in FINGER_ORDER}
+        palm_trajectories = {'left': {'x': [], 'y': [], 'z': []},
+                            'right': {'x': [], 'y': [], 'z': []}}
+
+        for trial in self.trials:
+            t = trial.elapsed_seconds
+
+            for hand_data, hand_type in [(trial.left_hand, 'left'), (trial.right_hand, 'right')]:
+                if hand_data is None:
+                    continue
+
+                # Palm position
+                palm = hand_data.get('palm_position', {})
+                palm_trajectories[hand_type]['x'].append(palm.get('x', 0))
+                palm_trajectories[hand_type]['y'].append(palm.get('y', 0))
+                palm_trajectories[hand_type]['z'].append(palm.get('z', 0))
+
+                # Finger positions
+                fingers = hand_data.get('fingers', {})
+                for finger_name, finger_data in fingers.items():
+                    full_name = f"{hand_type}_{finger_name}"
+                    tip = finger_data.get('tip_position', {})
+                    finger_trajectories[full_name]['x'].append(tip.get('x', 0))
+                    finger_trajectories[full_name]['y'].append(tip.get('y', 0))
+                    finger_trajectories[full_name]['z'].append(tip.get('z', 0))
+                    finger_trajectories[full_name]['t'].append(t)
+
+        # Normalize time for color mapping
+        all_times = [trial.elapsed_seconds for trial in self.trials]
+        t_min, t_max = min(all_times), max(all_times)
+
+        # Plot finger positions and trajectories
+        for finger_name in FINGER_ORDER:
+            traj = finger_trajectories[finger_name]
+            if not traj['x']:
+                continue
+
+            x, y, z = np.array(traj['x']), np.array(traj['y']), np.array(traj['z'])
+
+            # Determine colors
+            if color_by == 'finger':
+                color = FINGER_COLORS.get(finger_name, 'gray')
+                colors = [color] * len(x)
+            elif color_by == 'time':
+                cmap = plt.cm.viridis
+                colors = [cmap((t - t_min) / (t_max - t_min + 0.001)) for t in traj['t']]
+            else:  # color_by == 'correct'
+                colors = []
+                for i, trial in enumerate(self.trials):
+                    if i < len(x):
+                        colors.append('green' if trial.is_correct else 'red')
+
+            # Plot points
+            for i in range(len(x)):
+                c = colors[i] if i < len(colors) else 'gray'
+                is_target = self.trials[i].target_finger == finger_name if i < len(self.trials) else False
+                size = 100 if is_target else 30
+                marker = '*' if is_target else 'o'
+                ax.scatter(x[i], z[i], y[i], c=[c], s=size, marker=marker, alpha=0.7)
+
+            # Draw trajectory lines
+            if show_trajectories and len(x) > 1:
+                color = FINGER_COLORS.get(finger_name, 'gray')
+                ax.plot(x, z, y, color=color, alpha=0.3, linewidth=1)
+
+        # Labels and title
+        ax.set_xlabel('X (mm) - Left/Right')
+        ax.set_ylabel('Z (mm) - Forward/Back')
+        ax.set_zlabel('Y (mm) - Height')
+
+        summary = self.get_summary()
+        ax.set_title(f"3D Session Replay: {summary['total_trials']} trials | "
+                    f"{summary['accuracy']:.1f}% accuracy\n"
+                    f"(Stars = target fingers)")
+
+        # Add legend for fingers
+        legend_elements = [mpatches.Patch(color=FINGER_COLORS[f],
+                          label=FINGER_SHORT_NAMES[f]) for f in FINGER_ORDER[:5]]
+        ax.legend(handles=legend_elements, loc='upper left', title='Left Hand')
+
+        plt.tight_layout()
+        return fig
+
+    def plot_3d_trial(self, trial_number: int, figsize: Tuple[int, int] = (12, 9)):
+        """
+        Plot a single trial in full 3D with hand skeleton.
+
+        Args:
+            trial_number: Trial number (1-indexed)
+            figsize: Figure size
+        """
+        if not HAS_MATPLOTLIB:
+            raise ImportError("matplotlib is required for plotting")
+
+        trial = self.get_trial(trial_number)
+        if not trial:
+            print(f"Trial {trial_number} not found")
+            return
+
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Draw both hands
+        self._draw_hand_3d(ax, trial.left_hand, 'left', trial.target_finger)
+        self._draw_hand_3d(ax, trial.right_hand, 'right', trial.target_finger)
+
+        # Labels
+        ax.set_xlabel('X (mm)')
+        ax.set_ylabel('Z (mm)')
+        ax.set_zlabel('Y (mm) - Height')
+
+        # Title
+        status = "CORRECT" if trial.is_correct else "WRONG"
+        clean = " | CLEAN" if trial.is_clean_trial else ""
+        ax.set_title(
+            f"Trial {trial.number} (3D): Target={FINGER_SHORT_NAMES.get(trial.target_finger, '?')} | "
+            f"Pressed={FINGER_SHORT_NAMES.get(trial.pressed_finger, '?')} | {status}{clean}\n"
+            f"RT={trial.reaction_time_ms:.0f}ms | MLR={trial.mlr:.3f}",
+            fontsize=11
+        )
+
+        # Set equal aspect ratio
+        self._set_axes_equal_3d(ax)
+
+        plt.tight_layout()
+        return fig
+
+    def _draw_hand_3d(self, ax, hand_data: Optional[Dict], hand_type: str, target_finger: str):
+        """Draw a 3D hand skeleton."""
+        if hand_data is None:
+            return
+
+        palm = hand_data.get('palm_position', {})
+        palm_x, palm_y, palm_z = palm.get('x', 0), palm.get('y', 0), palm.get('z', 0)
+
+        # Draw palm
+        ax.scatter(palm_x, palm_z, palm_y, s=300, c='gray', alpha=0.5, marker='o')
+
+        # Draw fingers
+        fingers = hand_data.get('fingers', {})
+        for finger_name, finger_data in fingers.items():
+            full_name = f"{hand_type}_{finger_name}"
+            tip = finger_data.get('tip_position', {})
+            tip_x, tip_y, tip_z = tip.get('x', 0), tip.get('y', 0), tip.get('z', 0)
+
+            color = FINGER_COLORS.get(full_name, 'gray')
+            is_target = full_name == target_finger
+
+            # Draw line from palm to fingertip
+            ax.plot([palm_x, tip_x], [palm_z, tip_z], [palm_y, tip_y],
+                   color=color, linewidth=3 if is_target else 1.5, alpha=0.7)
+
+            # Draw fingertip
+            size = 200 if is_target else 80
+            marker = '*' if is_target else 'o'
+            ax.scatter(tip_x, tip_z, tip_y, s=size, c=[color], marker=marker,
+                      edgecolors='black' if is_target else 'none', linewidths=2)
+
+            # Label
+            ax.text(tip_x, tip_z, tip_y + 10, FINGER_SHORT_NAMES.get(full_name, ''),
+                   fontsize=8, ha='center')
+
+    def _set_axes_equal_3d(self, ax):
+        """Set equal aspect ratio for 3D plot."""
+        limits = np.array([ax.get_xlim3d(), ax.get_ylim3d(), ax.get_zlim3d()])
+        origin = np.mean(limits, axis=1)
+        radius = 0.5 * np.max(np.abs(limits[:, 1] - limits[:, 0]))
+        ax.set_xlim3d([origin[0] - radius, origin[0] + radius])
+        ax.set_ylim3d([origin[1] - radius, origin[1] + radius])
+        ax.set_zlim3d([origin[2] - radius, origin[2] + radius])
+
+    def plot_finger_trajectories_3d(self, fingers: List[str] = None,
+                                     figsize: Tuple[int, int] = (12, 8)):
+        """
+        Plot 3D trajectories of specific fingers over the session.
+
+        Args:
+            fingers: List of finger names to plot (default: all target fingers)
+            figsize: Figure size
+        """
+        if not HAS_MATPLOTLIB:
+            raise ImportError("matplotlib is required for plotting")
+
+        if not self.trials:
+            print("No trials to plot")
+            return
+
+        # Default to fingers that were targets
+        if fingers is None:
+            fingers = list(set(t.target_finger for t in self.trials))
+
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
+
+        for finger_name in fingers:
+            x_vals, y_vals, z_vals = [], [], []
+
+            for trial in self.trials:
+                hand_type = 'left' if 'left' in finger_name else 'right'
+                hand_data = trial.left_hand if hand_type == 'left' else trial.right_hand
+
+                if hand_data is None:
+                    continue
+
+                finger_short = finger_name.replace(f'{hand_type}_', '')
+                fingers_data = hand_data.get('fingers', {})
+                if finger_short in fingers_data:
+                    tip = fingers_data[finger_short].get('tip_position', {})
+                    x_vals.append(tip.get('x', 0))
+                    y_vals.append(tip.get('y', 0))
+                    z_vals.append(tip.get('z', 0))
+
+            if x_vals:
+                color = FINGER_COLORS.get(finger_name, 'gray')
+                # Plot trajectory
+                ax.plot(x_vals, z_vals, y_vals, color=color, linewidth=2,
+                       label=FINGER_SHORT_NAMES.get(finger_name, finger_name), alpha=0.7)
+                # Plot points
+                ax.scatter(x_vals, z_vals, y_vals, c=[color], s=50, alpha=0.5)
+                # Mark start and end
+                ax.scatter(x_vals[0], z_vals[0], y_vals[0], c=[color], s=150, marker='^',
+                          edgecolors='black', label=f'{FINGER_SHORT_NAMES.get(finger_name, "")} start')
+                ax.scatter(x_vals[-1], z_vals[-1], y_vals[-1], c=[color], s=150, marker='s',
+                          edgecolors='black')
+
+        ax.set_xlabel('X (mm)')
+        ax.set_ylabel('Z (mm)')
+        ax.set_zlabel('Y (mm) - Height')
+        ax.set_title('Finger Trajectories Over Session\n(Triangle=start, Square=end)')
+        ax.legend(loc='upper left', fontsize=8)
+
+        self._set_axes_equal_3d(ax)
+        plt.tight_layout()
+        return fig
+
+    def animate_session(self, interval: int = 500, figsize: Tuple[int, int] = (12, 9),
+                        save_path: str = None):
+        """
+        Create an animated 3D replay of the session.
+
+        Args:
+            interval: Milliseconds between frames
+            figsize: Figure size
+            save_path: If provided, save animation to this path (e.g., 'session.gif')
+
+        Returns:
+            matplotlib animation object (display in Jupyter with HTML(anim.to_jshtml()))
+        """
+        if not HAS_MATPLOTLIB:
+            raise ImportError("matplotlib is required for plotting")
+
+        if not self.trials:
+            print("No trials to animate")
+            return
+
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Initialize empty plot elements
+        scatter_plots = {}
+        line_plots = {}
+
+        def init():
+            ax.set_xlabel('X (mm)')
+            ax.set_ylabel('Z (mm)')
+            ax.set_zlabel('Y (mm) - Height')
+            ax.set_xlim(-250, 250)
+            ax.set_ylim(-50, 200)
+            ax.set_zlim(150, 350)
+            return []
+
+        def update(frame):
+            ax.clear()
+            ax.set_xlabel('X (mm)')
+            ax.set_ylabel('Z (mm)')
+            ax.set_zlabel('Y (mm) - Height')
+            ax.set_xlim(-250, 250)
+            ax.set_ylim(-50, 200)
+            ax.set_zlim(150, 350)
+
+            trial = self.trials[frame]
+
+            # Draw hands
+            self._draw_hand_3d(ax, trial.left_hand, 'left', trial.target_finger)
+            self._draw_hand_3d(ax, trial.right_hand, 'right', trial.target_finger)
+
+            # Title with trial info
+            status = "CORRECT" if trial.is_correct else "WRONG"
+            status_color = 'green' if trial.is_correct else 'red'
+            ax.set_title(
+                f"Trial {trial.number}/{len(self.trials)} | "
+                f"Target: {FINGER_SHORT_NAMES.get(trial.target_finger, '?')} | "
+                f"{status}\n"
+                f"Time: {trial.elapsed_seconds:.1f}s | Score: {trial.score}",
+                fontsize=12, color=status_color
+            )
+
+            return []
+
+        anim = animation.FuncAnimation(fig, update, init_func=init,
+                                       frames=len(self.trials), interval=interval,
+                                       blit=False, repeat=True)
+
+        if save_path:
+            print(f"Saving animation to {save_path}...")
+            anim.save(save_path, writer='pillow', fps=1000//interval)
+            print("Done!")
+
+        return anim
+
+    def plot_press_positions_3d(self, figsize: Tuple[int, int] = (12, 8)):
+        """
+        Plot only the pressed finger positions in 3D, colored by correctness.
+
+        Shows where the pressed finger was at the moment of each press.
+        """
+        if not HAS_MATPLOTLIB:
+            raise ImportError("matplotlib is required for plotting")
+
+        if not self.trials:
+            print("No trials to plot")
+            return
+
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
+
+        correct_x, correct_y, correct_z = [], [], []
+        wrong_x, wrong_y, wrong_z = [], [], []
+
+        for trial in self.trials:
+            # Get the pressed finger position
+            pressed = trial.pressed_finger
+            hand_type = 'left' if 'left' in pressed else 'right'
+            hand_data = trial.left_hand if hand_type == 'left' else trial.right_hand
+
+            if hand_data is None:
+                continue
+
+            finger_short = pressed.replace(f'{hand_type}_', '')
+            fingers_data = hand_data.get('fingers', {})
+
+            if finger_short in fingers_data:
+                tip = fingers_data[finger_short].get('tip_position', {})
+                x, y, z = tip.get('x', 0), tip.get('y', 0), tip.get('z', 0)
+
+                if trial.is_correct:
+                    correct_x.append(x)
+                    correct_y.append(y)
+                    correct_z.append(z)
+                else:
+                    wrong_x.append(x)
+                    wrong_y.append(y)
+                    wrong_z.append(z)
+
+        # Plot correct presses
+        if correct_x:
+            ax.scatter(correct_x, correct_z, correct_y, c='green', s=100,
+                      alpha=0.7, label=f'Correct ({len(correct_x)})', marker='o')
+
+        # Plot wrong presses
+        if wrong_x:
+            ax.scatter(wrong_x, wrong_z, wrong_y, c='red', s=150,
+                      alpha=0.7, label=f'Wrong ({len(wrong_x)})', marker='x')
+
+        ax.set_xlabel('X (mm)')
+        ax.set_ylabel('Z (mm)')
+        ax.set_zlabel('Y (mm) - Height')
+        ax.set_title('Pressed Finger Positions (3D)\nGreen=Correct, Red=Wrong')
+        ax.legend()
+
+        self._set_axes_equal_3d(ax)
         plt.tight_layout()
         return fig
 
