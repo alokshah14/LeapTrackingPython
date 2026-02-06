@@ -198,6 +198,9 @@ class CalibrationManager:
 
     def get_current_finger(self) -> Optional[str]:
         """Get the finger currently being calibrated."""
+        # Only return a finger when we're actually calibrating individual fingers
+        if self.calibration_phase != 'calibrating_finger':
+            return None
         if self.current_finger_index < len(FINGER_NAMES):
             return FINGER_NAMES[self.current_finger_index]
         return None
