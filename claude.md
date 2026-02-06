@@ -578,3 +578,30 @@ HTML(anim.to_jshtml())  # Display in Jupyter
 # Save as GIF
 analyzer.animate_session(save_path='session_replay.gif')
 ```
+
+#### Gameplay UI - Left/Right Side Distinction
+**User Request**: Make left and right sides more visually distinct during gameplay
+
+**Implementation** in `ui/game_ui.py`:
+
+1. **Background Tints**:
+   - Left half: Subtle blue tint (30, 50, 80)
+   - Right half: Subtle green tint (50, 80, 50)
+
+2. **Center Divider**:
+   - Bold vertical line separating left/right sides
+   - Decorative arrow marker at top
+
+3. **Hand Labels**:
+   - "LEFT HAND" label (blue) centered over left 5 lanes
+   - "RIGHT HAND" label (green) centered over right 5 lanes
+
+4. **Lane Colors**:
+   - Left lanes: Blue-tinted backgrounds and borders
+   - Right lanes: Green-tinted backgrounds and borders
+   - Active lanes highlight in their respective colors
+
+5. **Visual Indicators**:
+   - Colored bars at top of each lane (blue vs green)
+   - Target zone line at bottom split-colored by side
+   - Stars in background tinted by side
