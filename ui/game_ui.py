@@ -60,13 +60,39 @@ class GameUI:
         game_area_rect = pygame.Rect(0, 0, WINDOW_WIDTH, GAME_AREA_BOTTOM)
         pygame.draw.rect(self.surface, BACKGROUND, game_area_rect)
 
+        # Draw distinct background tints for left vs right sides
+        left_tint = pygame.Surface((WINDOW_WIDTH // 2, GAME_AREA_BOTTOM - GAME_AREA_TOP), pygame.SRCALPHA)
+        left_tint.fill((30, 50, 80, 40))  # Subtle blue tint for left
+        self.surface.blit(left_tint, (0, GAME_AREA_TOP))
+
+        right_tint = pygame.Surface((WINDOW_WIDTH // 2, GAME_AREA_BOTTOM - GAME_AREA_TOP), pygame.SRCALPHA)
+        right_tint.fill((50, 80, 50, 40))  # Subtle green tint for right
+        self.surface.blit(right_tint, (WINDOW_WIDTH // 2, GAME_AREA_TOP))
+
+        # Draw center divider (between left thumb and right thumb)
+        center_x = WINDOW_WIDTH // 2
+        pygame.draw.line(self.surface, (100, 100, 150), (center_x, GAME_AREA_TOP), (center_x, GAME_AREA_BOTTOM), 4)
+
+        # Draw decorative center marker
+        pygame.draw.polygon(self.surface, (100, 100, 150), [
+            (center_x - 15, GAME_AREA_TOP),
+            (center_x + 15, GAME_AREA_TOP),
+            (center_x, GAME_AREA_TOP + 20)
+        ])
+
         # Draw stars in game area
         for i in range(50):
             x = (i * 97) % WINDOW_WIDTH
-            y = (i * 53) % GAME_AREA_BOTTOM
+            y = GAME_AREA_TOP + (i * 53) % (GAME_AREA_BOTTOM - GAME_AREA_TOP)
             size = (i % 3) + 1
-            brightness = 100 + (i * 7) % 155
-            pygame.draw.circle(self.surface, (brightness, brightness, brightness), (x, y), size)
+            # Tint stars based on side
+            if x < WINDOW_WIDTH // 2:
+                brightness = 80 + (i * 7) % 100
+                color = (brightness, brightness, brightness + 40)  # Bluish
+            else:
+                brightness = 80 + (i * 7) % 100
+                color = (brightness, brightness + 40, brightness)  # Greenish
+            pygame.draw.circle(self.surface, color, (x, y), size)
 
     def draw_lanes(self, target_fingers: List[str] = None):
         """
@@ -77,44 +103,79 @@ class GameUI:
         """
         target_fingers = target_fingers or []
 
+        # Draw "LEFT HAND" and "RIGHT HAND" labels
+        left_label = self.fonts['medium'].render("LEFT HAND", True, (100, 150, 200))
+        left_rect = left_label.get_rect(center=(WINDOW_WIDTH // 4, GAME_AREA_TOP + 25))
+        self.surface.blit(left_label, left_rect)
+
+        right_label = self.fonts['medium'].render("RIGHT HAND", True, (100, 200, 100))
+        right_rect = right_label.get_rect(center=(3 * WINDOW_WIDTH // 4, GAME_AREA_TOP + 25))
+        self.surface.blit(right_label, right_rect)
+
         for i in range(10):
             x = i * LANE_WIDTH
             finger_name = FINGER_NAMES[i]
+            is_left_side = i < 5  # First 5 lanes are left hand
+
+            # Determine lane colors based on side
+            if is_left_side:
+                active_color = (40, 60, 100)  # Blue-tinted active
+                inactive_color = (20, 25, 40)  # Dark blue inactive
+                border_color = (60, 80, 120)  # Blue border
+            else:
+                active_color = (40, 80, 50)  # Green-tinted active
+                inactive_color = (20, 35, 25)  # Dark green inactive
+                border_color = (60, 100, 70)  # Green border
 
             # Lane background (subtle highlight for active lanes)
             if finger_name in target_fingers:
-                # Highlight active lanes
                 pygame.draw.rect(
                     self.surface,
-                    (40, 40, 80),
-                    (x, GAME_AREA_TOP, LANE_WIDTH, GAME_AREA_BOTTOM - GAME_AREA_TOP)
+                    active_color,
+                    (x, GAME_AREA_TOP + 50, LANE_WIDTH, GAME_AREA_BOTTOM - GAME_AREA_TOP - 50)
                 )
             else:
                 pygame.draw.rect(
                     self.surface,
-                    LANE_COLOR,
-                    (x, GAME_AREA_TOP, LANE_WIDTH, GAME_AREA_BOTTOM - GAME_AREA_TOP)
+                    inactive_color,
+                    (x, GAME_AREA_TOP + 50, LANE_WIDTH, GAME_AREA_BOTTOM - GAME_AREA_TOP - 50)
                 )
 
-            # Lane divider
+            # Lane divider with side-specific color
             pygame.draw.line(
                 self.surface,
-                LANE_BORDER,
-                (x, GAME_AREA_TOP),
+                border_color,
+                (x, GAME_AREA_TOP + 50),
                 (x, GAME_AREA_BOTTOM),
                 1
             )
 
-            # Lane label at bottom
-            label = self.fonts['small'].render(FINGER_DISPLAY_NAMES[i], True, FINGER_COLORS[finger_name])
+            # Lane label at bottom with side-specific styling
+            label_color = FINGER_COLORS[finger_name]
+            label = self.fonts['small'].render(FINGER_DISPLAY_NAMES[i], True, label_color)
             label_rect = label.get_rect(center=(x + LANE_WIDTH // 2, GAME_AREA_BOTTOM - 15))
             self.surface.blit(label, label_rect)
 
-        # Draw bottom line (target zone)
+            # Draw small colored indicator at top of each lane
+            indicator_color = (80, 120, 180) if is_left_side else (80, 160, 100)
+            pygame.draw.rect(
+                self.surface,
+                indicator_color,
+                (x + 2, GAME_AREA_TOP + 45, LANE_WIDTH - 4, 4)
+            )
+
+        # Draw bottom line (target zone) - split colored
         pygame.draw.line(
             self.surface,
-            (100, 100, 150),
+            (80, 100, 150),  # Blue for left
             (0, GAME_AREA_BOTTOM),
+            (WINDOW_WIDTH // 2, GAME_AREA_BOTTOM),
+            3
+        )
+        pygame.draw.line(
+            self.surface,
+            (80, 150, 100),  # Green for right
+            (WINDOW_WIDTH // 2, GAME_AREA_BOTTOM),
             (WINDOW_WIDTH, GAME_AREA_BOTTOM),
             3
         )
