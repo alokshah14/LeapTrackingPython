@@ -523,3 +523,58 @@ df = analyzer.to_dataframe()
 **Dependencies Added**:
 - matplotlib (for plotting)
 - pandas (for DataFrame export, optional)
+
+#### 3D Session Visualization & Replay
+**User Request**: Plot 3D rendering of hand positions to recreate playing sessions visually
+
+**Implementation** - New methods in `SessionAnalyzer`:
+
+1. **`plot_3d_session()`** - Full session in 3D:
+   - Shows all finger positions across all trials
+   - Optional trajectory lines connecting positions over time
+   - Color by finger, time gradient, or correctness
+   - Stars mark target fingers, circles for non-targets
+
+2. **`plot_3d_trial(n)`** - Single trial 3D view:
+   - Full hand skeleton with palm and all fingers
+   - Lines from palm to fingertips
+   - Target finger highlighted with star marker
+   - Shows RT, MLR, and correctness in title
+
+3. **`plot_finger_trajectories_3d()`** - Finger paths:
+   - Plots movement trajectories of specified fingers
+   - Triangle marks start, square marks end
+   - Useful for seeing movement patterns
+
+4. **`plot_press_positions_3d()`** - Press locations:
+   - Only shows where pressed finger was at moment of press
+   - Green = correct, Red = wrong
+   - Good for seeing error clustering
+
+5. **`animate_session()`** - Animated replay:
+   - Steps through trials showing hand state at each press
+   - Configurable frame interval
+   - Can save as GIF: `animate_session(save_path='replay.gif')`
+   - Display in Jupyter: `HTML(anim.to_jshtml())`
+
+**Usage**:
+```python
+from analysis import SessionAnalyzer
+from IPython.display import HTML
+
+analyzer = SessionAnalyzer()
+analyzer.load_session('session_logs/session_20260206_082618.json')
+
+# Static 3D views
+analyzer.plot_3d_session()
+analyzer.plot_3d_trial(1)
+analyzer.plot_finger_trajectories_3d()
+analyzer.plot_press_positions_3d()
+
+# Animated replay
+anim = analyzer.animate_session(interval=800)
+HTML(anim.to_jshtml())  # Display in Jupyter
+
+# Save as GIF
+analyzer.animate_session(save_path='session_replay.gif')
+```
